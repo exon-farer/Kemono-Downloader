@@ -875,25 +875,22 @@ class PostProcessorWorker:
     def process(self):
 
         if self.service == 'discord':
-            # For Discord, self.post is a MESSAGE object from the API.
             post_title = self.post.get('content', '') or f"Message {self.post.get('id', 'N/A')}"
             post_id = self.post.get('id', 'unknown_id')
-            post_main_file_info = {}  # Discord messages don't have a single main file
+            post_main_file_info = {}  
             post_attachments = self.post.get('attachments', [])
             post_content_html = self.post.get('content', '')
-            post_data = self.post  # Keep a reference to the original message object
+            post_data = self.post  
             log_prefix = "Message"
         else:
-            # Existing logic for standard creator posts
             post_title = self.post.get('title', '') or 'untitled_post'
             post_id = self.post.get('id', 'unknown_id')
             post_main_file_info = self.post.get('file')
             post_attachments = self.post.get('attachments', [])
             post_content_html = self.post.get('content', '')
-            post_data = self.post  # Reference to the post object
+            post_data = self.post 
             log_prefix = "Post"
 
-        # --- FIX: FETCH FULL POST DATA IF CONTENT IS MISSING BUT NEEDED ---
         content_is_needed = (
             self.show_external_links or
             self.extract_links_only or

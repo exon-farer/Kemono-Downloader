@@ -60,7 +60,6 @@ RESOLUTION_KEY = "window_resolution"
 UI_SCALE_KEY = "ui_scale_factor"
 SAVE_CREATOR_JSON_KEY = "saveCreatorJsonProfile"
 FETCH_FIRST_KEY = "fetchAllPostsFirst"
-# --- FIX: Add the missing key for the Discord token ---
 DISCORD_TOKEN_KEY = "discord/token"
 
 POST_DOWNLOAD_ACTION_KEY = "postDownloadAction"

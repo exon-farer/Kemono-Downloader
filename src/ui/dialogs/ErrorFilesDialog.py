@@ -42,17 +42,12 @@ class ErrorFilesDialog(QDialog):
         if app_icon and not app_icon.isNull():
             self.setWindowIcon(app_icon)
 
-        # --- START OF FIX ---
-        # Get the user-defined scale factor from the parent application.
         scale_factor = getattr(self.parent_app, 'scale_factor', 1.0)
 
-        # Define base dimensions and apply the correct scale factor.
         base_width, base_height = 550, 400
         self.setMinimumSize(int(base_width * scale_factor), int(base_height * scale_factor))
         self.resize(int(base_width * scale_factor * 1.1), int(base_height * scale_factor * 1.1))
-        # --- END OF FIX ---
 
-        # --- Initialize UI and Apply Theming ---
         self._init_ui()
         self._retranslate_ui()
         self._apply_theme()

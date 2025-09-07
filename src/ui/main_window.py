@@ -260,6 +260,8 @@ class DownloaderApp (QWidget ):
         self.is_fetching_only = False
         self.fetched_posts_for_download = []
         self.is_ready_to_download_fetched = False 
+        self.last_logged_filter_mode = None
+        self.last_logged_external_link_status = None
 
 
         print(f"ℹ️ Known.txt will be loaded/saved at: {self.config_file}")
@@ -406,7 +408,6 @@ class DownloaderApp (QWidget ):
 
                     try:
                         queue_logger(f"   Downloading ({download_count+1}/{total_attachments}): '{filename_to_use}'...")
-                        # --- FIX: Stream the download in chunks for responsive controls ---
                         response = requests.get(file_url, stream=True, timeout=60)
                         response.raise_for_status()
                         
@@ -2340,49 +2341,60 @@ class DownloaderApp (QWidget ):
                 self.log_signal.emit(f"   ⚠️ Could not delete temp file '{filepath}': {e}")
         self.session_temp_files = []
 
-    def update_external_links_setting (self ,checked ):
-        is_only_links_mode =self .radio_only_links and self .radio_only_links .isChecked ()
-        is_only_archives_mode =self .radio_only_archives and self .radio_only_archives .isChecked ()
+    def update_external_links_setting(self, checked, log_change=True):
+        is_only_links_mode = self.radio_only_links and self.radio_only_links.isChecked()
+        is_only_archives_mode = self.radio_only_archives and self.radio_only_archives.isChecked()
+        is_only_audio_mode = hasattr(self, 'radio_only_audio') and self.radio_only_audio.isChecked()
 
-        if is_only_links_mode or is_only_archives_mode :
-            if self .external_log_output :self .external_log_output .hide ()
-            if self .log_splitter :self .log_splitter .setSizes ([self .height (),0 ])
-            return 
+        if is_only_links_mode or is_only_archives_mode or is_only_audio_mode:
+            if self.external_log_output: self.external_log_output.hide()
+            if self.log_splitter: self.log_splitter.setSizes([self.height(), 0])
+            return
 
-        self .show_external_links =checked 
-        if checked :
-            if self .external_log_output :self .external_log_output .show ()
-            if self .log_splitter :self .log_splitter .setSizes ([self .height ()//2 ,self .height ()//2 ])
-            if self .main_log_output :self .main_log_output .setMinimumHeight (50 )
-            if self .external_log_output :self .external_log_output .setMinimumHeight (50 )
-            self.log_signal.emit("ℹ️ External Links Log Enabled")
-            if self .external_log_output :
-                self .external_log_output .clear ()
-                self .external_log_output .append ("🔗 External Links Found:")
-            self ._try_process_next_external_link ()
-        else :
-            if self .external_log_output :self .external_log_output .hide ()
-            if self .log_splitter :self .log_splitter .setSizes ([self .height (),0 ])
-            if self .main_log_output :self .main_log_output .setMinimumHeight (0 )
-            if self .external_log_output :self .external_log_output .setMinimumHeight (0 )
-            if self .external_log_output :self .external_log_output .clear ()
-            self.log_signal.emit("ℹ️ External Links Log Disabled")
+        self.show_external_links = checked
+
+        if log_change and self.last_logged_external_link_status != checked:
+            if checked:
+                self.log_signal.emit("ℹ️ External Links Log Enabled")
+            else:
+                self.log_signal.emit("ℹ️ External Links Log Disabled")
+            self.last_logged_external_link_status = checked
+
+        if checked:
+            if self.external_log_output: self.external_log_output.show()
+            if self.log_splitter: self.log_splitter.setSizes([self.height() // 2, self.height() // 2])
+            if self.main_log_output: self.main_log_output.setMinimumHeight(50)
+            if self.external_log_output: self.external_log_output.setMinimumHeight(50)
+            if self.external_log_output:
+                self.external_log_output.clear()
+                self.external_log_output.append("🔗 External Links Found:")
+            self._try_process_next_external_link()
+        else:
+            if self.external_log_output: self.external_log_output.hide()
+            if self.log_splitter: self.log_splitter.setSizes([self.height(), 0])
+            if self.main_log_output: self.main_log_output.setMinimumHeight(0)
+            if self.external_log_output: self.external_log_output.setMinimumHeight(0)
+            if self.external_log_output: self.external_log_output.clear()
 
     def _handle_filter_mode_change(self, button, checked):
         if not button or not checked:
             return
+
+        new_mode_text = button.text()
+        if self.last_logged_filter_mode != new_mode_text:
+            self.log_signal.emit(f"ℹ️ Filter mode changed to: {new_mode_text}")
+            self.last_logged_filter_mode = new_mode_text
+
         is_only_links = (button == self.radio_only_links)
 
         if hasattr(self, 'use_multithreading_checkbox') and hasattr(self, 'thread_count_input'):
             if is_only_links:
-                # When "Only Links" is selected, enable multithreading, set threads to 20, and lock the input.
                 self.use_multithreading_checkbox.setChecked(True)
                 self.thread_count_input.setText("20")
                 self.thread_count_input.setEnabled(False) 
                 self.thread_count_label.setEnabled(False)
                 self.update_multithreading_label("20")
             else:
-                # When another mode is selected, re-enable the input for user control.
                 is_multithreading_checked = self.use_multithreading_checkbox.isChecked()
                 self.thread_count_input.setEnabled(is_multithreading_checked)
                 self.thread_count_label.setEnabled(is_multithreading_checked)
@@ -2448,38 +2460,11 @@ class DownloaderApp (QWidget ):
 
         if is_only_links:
             self.progress_log_label.setText("📜 Extracted Links Log:")
-            if self.external_log_output: self.external_log_output.hide()
-            if self.log_splitter: self.log_splitter.setSizes([self.height(), 0])
-
-            do_clear_log_in_filter_change = True
-            if self.mega_download_log_preserved_once and self.only_links_log_display_mode == LOG_DISPLAY_DOWNLOAD_PROGRESS:
-                do_clear_log_in_filter_change = False
-
-            if self.main_log_output and do_clear_log_in_filter_change:
-                self.log_signal.emit("INTERNAL: _handle_filter_mode_change - About to clear log.")
-                self.main_log_output.clear()
-                self.log_signal.emit("INTERNAL: _handle_filter_mode_change - Log cleared by _handle_filter_mode_change.")
-
-            if self.main_log_output: self.main_log_output.setMinimumHeight(0)
-            self.log_signal.emit(f"ℹ️ Filter mode changed to: {button.text()}")
-            self._try_process_next_external_link()
-        elif is_only_archives:
-            self.progress_log_label.setText("📜 Progress Log (Archives Only):")
-            if self.external_log_output: self.external_log_output.hide()
-            if self.log_splitter: self.log_splitter.setSizes([self.height(), 0])
-            if self.main_log_output: self.main_log_output.clear()
-            self.log_signal.emit(f"ℹ️ Filter mode changed to: {button.text()}")
-        elif is_only_audio:
-            self.progress_log_label.setText(self._tr("progress_log_label_text", "📜 Progress Log:") + f" ({self._tr('filter_audio_radio', '🎧 Only Audio')})")
-            if self.external_log_output: self.external_log_output.hide()
-            if self.log_splitter: self.log_splitter.setSizes([self.height(), 0])
-            if self.main_log_output: self.main_log_output.clear()
-            self.log_signal.emit(f"ℹ️ Filter mode changed to: {button.text()}")
         else:
             self.progress_log_label.setText(self._tr("progress_log_label_text", "📜 Progress Log:"))
-            self.update_external_links_setting(self.external_links_checkbox.isChecked() if self.external_links_checkbox else False)
-            self.log_signal.emit(f"ℹ️ Filter mode changed to: {button.text()}")
-
+        
+        self.update_external_links_setting(self.external_links_checkbox.isChecked() if self.external_links_checkbox else False)
+        
         if is_only_links:
             self._filter_links_log()
 
@@ -2509,13 +2494,11 @@ class DownloaderApp (QWidget ):
         self.update_custom_folder_visibility()
         self.update_ui_for_manga_mode(self.manga_mode_checkbox.isChecked() if self.manga_mode_checkbox else False)
 
-
     def _filter_links_log (self ):
         if not (self .radio_only_links and self .radio_only_links .isChecked ()):return
 
         search_term =self .link_search_input .text ().lower ().strip ()if self .link_search_input else ""
 
-        # This block handles the "Download Progress" view for Mega/Drive links and should be kept
         if self .mega_download_log_preserved_once and self .only_links_log_display_mode ==LOG_DISPLAY_DOWNLOAD_PROGRESS :
             self .log_signal .emit ("INTERNAL: _filter_links_log - Preserving Mega log.")
             return
@@ -3294,7 +3277,6 @@ class DownloaderApp (QWidget ):
             self.manga_rename_toggle_button, self.manga_date_prefix_input,
             self.multipart_toggle_button, self.custom_folder_input, self.custom_folder_label,
             self.discord_scope_toggle_button
-            # --- FIX: REMOVED self.save_discord_as_pdf_btn from this list ---
         ]
 
         enable_state = not is_specialized
@@ -3335,14 +3317,10 @@ class DownloaderApp (QWidget ):
         url_text = self.link_input.text().strip()
         service, _, _ = extract_post_info(url_text) 
 
-        # --- FIX: Use two separate flags for better control ---
-        # This is true for BOTH kemono.cr/discord and discord.com
         is_any_discord_url = (service == 'discord')
-        # This is ONLY true for official discord.com
         is_official_discord_url = 'discord.com' in url_text and is_any_discord_url
 
         if is_official_discord_url:
-            # Show the token input only for the official site
             self.remove_from_filename_label_widget.setText("🔑 Discord Token:")
             self.remove_from_filename_input.setPlaceholderText("Enter your Discord Authorization Token here")
             self.remove_from_filename_input.setEchoMode(QLineEdit.Password) 
@@ -3355,16 +3333,13 @@ class DownloaderApp (QWidget ):
             self.remove_from_filename_input.setPlaceholderText(self._tr("remove_from_filename_input_placeholder_text", "e.g., patreon, HD"))
             self.remove_from_filename_input.setEchoMode(QLineEdit.Normal)
 
-        # Handle other specialized downloaders (Bunkr, nhentai, etc.)
         is_saint2 = 'saint2.su' in url_text or 'saint2.pk' in url_text
         is_erome = 'erome.com' in url_text 
         is_specialized = service in ['bunkr', 'nhentai', 'hentai2read'] or is_saint2 or is_erome
         self._set_ui_for_specialized_downloader(is_specialized)
 
-        # --- FIX: Show the Scope button for ANY Discord URL (Kemono or official) ---
         self.discord_scope_toggle_button.setVisible(is_any_discord_url)
         if hasattr(self, 'discord_message_limit_input'):
-            # Only show the message limit for the official site, as it's an API feature
             self.discord_message_limit_input.setVisible(is_official_discord_url)
 
         if is_any_discord_url: 
@@ -3705,16 +3680,12 @@ class DownloaderApp (QWidget ):
                 server_id=server_id, channel_id=channel_id, url=api_url, limit=message_limit, parent=self
             )
 
-            # 2. Connect its signals to the main window's functions
             self.download_thread.progress_signal.connect(self.handle_main_log)
             self.download_thread.progress_label_signal.connect(self.progress_label.setText)
             self.download_thread.finished_signal.connect(self.download_finished)
             
-            # --- FIX: Start the thread BEFORE updating the UI ---
-            # 3. Start the download process in the background
             self.download_thread.start()
             
-            # 4. NOW, update the UI. The app knows a download is active.
             self.set_ui_enabled(False)
             self._update_button_states_and_connections()
             
@@ -5185,14 +5156,11 @@ class DownloaderApp (QWidget ):
             self ._handle_favorite_mode_toggle (is_fav_mode_active )
 
     def _handle_pause_resume_action(self):
-        # --- FIX: Simplified and corrected the pause/resume logic ---
         if not self._is_download_active():
             return
 
-        # Toggle the main app's pause state tracker
         self.is_paused = not self.is_paused
 
-        # Call the correct method on the thread based on the new state
         if isinstance(self.download_thread, DiscordDownloadThread):
             if self.is_paused:
                 self.download_thread.pause()
@@ -5518,7 +5486,6 @@ class DownloaderApp (QWidget ):
             self.log_signal.emit("✅ Download complete! Notification sound played.")
             return
         
-        # --- FIX: Ensure confirm_title is defined before it is used ---
         confirm_title = self._tr("action_confirmation_title", "Action After Download")
         confirm_text = ""
         

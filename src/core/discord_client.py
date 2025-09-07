@@ -43,9 +43,7 @@ def fetch_channel_messages(channel_id, logger=print, cancellation_event=None, pa
     }
     
     offset = 0
-    # --- FIX: Corrected the page size for Discord API pagination ---
     page_size = 150 
-    # --- END FIX ---
 
     while True:
         if cancellation_event and cancellation_event.is_set():
