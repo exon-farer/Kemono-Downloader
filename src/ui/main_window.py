@@ -3616,6 +3616,48 @@ class DownloaderApp (QWidget ):
                 self._process_next_favorite_download()
             return True
 
+        if api_url.strip().lower() in ['hentai2read.com', 'https://hentai2read.com', 'http://hentai2read.com']:
+            self.log_signal.emit("=" * 40)
+            self.log_signal.emit("🚀 Hentai2Read batch download mode detected.")
+            
+            h2r_txt_path = os.path.join(self.app_base_dir, "appdata", "hentai2read.txt")
+            self.log_signal.emit(f"   Looking for batch file at: {h2r_txt_path}")
+
+            if not os.path.exists(h2r_txt_path):
+                QMessageBox.warning(self, "File Not Found", f"To use batch mode, create a file named 'hentai2read.txt' in your 'appdata' folder.\n\nPlace one Hentai2Read gallery URL on each line.")
+                self.log_signal.emit(f"   ❌ 'hentai2read.txt' not found. Aborting batch download.")
+                return False
+
+            urls_to_download = []
+            try:
+                with open(h2r_txt_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        found_urls = re.findall(r'https?://hentai2read\.com/[^/]+/\d+/?', line)
+                        if found_urls:
+                            urls_to_download.extend(found_urls)
+            except Exception as e:
+                QMessageBox.critical(self, "File Error", f"Could not read 'hentai2read.txt':\n{e}")
+                self.log_signal.emit(f"   ❌ Error reading 'hentai2read.txt': {e}")
+                return False
+
+            if not urls_to_download:
+                QMessageBox.information(self, "Empty File", "No valid Hentai2Read gallery URLs were found in 'hentai2read.txt'.")
+                self.log_signal.emit("   'hentai2read.txt' was found but contained no valid URLs.")
+                return False
+            
+            self.log_signal.emit(f"   Found {len(urls_to_download)} URLs to process.")
+            self.favorite_download_queue.clear()
+            for url in urls_to_download:
+                self.favorite_download_queue.append({
+                    'url': url,
+                    'name': f"Hentai2Read gallery from batch",
+                    'type': 'post'
+                })
+            
+            if not self.is_processing_favorites_queue:
+                self._process_next_favorite_download()
+            return True
+
         if not is_restore:
             self._create_initial_session_file(api_url, effective_output_dir_for_run, remaining_queue=self.favorite_download_queue)
 
@@ -7085,8 +7127,16 @@ class Hentai2readDownloadThread(QThread):
             self.progress_signal.emit("-" * 40)
             self.progress_signal.emit(f"Downloading Chapter {chapter_data['chapter_num']}: '{chapter_album_name}'")
 
-            series_folder_name = clean_folder_name(chapter_album_name.split(' Chapter')[0])
-            chapter_folder_name = clean_folder_name(chapter_album_name)
+            series_name_raw = chapter_album_name.split(' Chapter')[0]
+            series_folder_name = clean_folder_name(series_name_raw)
+            
+            MAX_FOLDER_LEN = 100
+            if len(series_folder_name) > MAX_FOLDER_LEN:
+                series_folder_name = series_folder_name[:MAX_FOLDER_LEN].strip()
+
+            chapter_part_raw = "Chapter " + str(chapter_data['chapter_num'])
+            chapter_folder_name = clean_folder_name(chapter_part_raw)
+            
             final_save_path = os.path.join(self.output_dir, series_folder_name, chapter_folder_name)
             os.makedirs(final_save_path, exist_ok=True)
             
