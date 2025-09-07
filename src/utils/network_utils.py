@@ -138,22 +138,10 @@ def prepare_cookies_for_request(use_cookie_flag, cookie_text_input, selected_coo
     return None
 
 
-# In src/utils/network_utils.py
-
 def extract_post_info(url_string):
     """
     Parses a URL string to extract the service, user ID, and post ID.
-    UPDATED to support Discord, Bunkr, and nhentai URLs.
-
-    Args:
-        url_string (str): The URL to parse.
-
-    Returns:
-        tuple: A tuple containing (service, id1, id2).
-               For posts: (service, user_id, post_id).
-               For Discord: ('discord', server_id, channel_id).
-               For Bunkr: ('bunkr', full_url, None).
-               For nhentai: ('nhentai', gallery_id, None).
+    UPDATED to support Hentai2Read series and chapters.
     """
     if not isinstance(url_string, str) or not url_string.strip():
         return None, None, None
@@ -171,6 +159,18 @@ def extract_post_info(url_string):
     nhentai_match = re.search(r'nhentai\.net/g/(\d+)', stripped_url)
     if nhentai_match:
         return 'nhentai', nhentai_match.group(1), None
+    
+    # --- Hentai2Read Check (Updated) ---
+    # This regex now captures the manga slug (id1) and optionally the chapter number (id2)
+    hentai2read_match = re.search(r'hentai2read\.com/([^/]+)(?:/(\d+))?/?', stripped_url)
+    if hentai2read_match:
+        manga_slug, chapter_num = hentai2read_match.groups()
+        return 'hentai2read', manga_slug, chapter_num # chapter_num will be None for series URLs
+
+    discord_channel_match = re.search(r'discord\.com/channels/(@me|\d+)/(\d+)', stripped_url)
+    if discord_channel_match:
+        server_id, channel_id = discord_channel_match.groups()
+        return 'discord', server_id, channel_id
 
     # --- Kemono/Coomer/Discord Parsing ---
     try:

@@ -2,6 +2,7 @@ import sys
 import os
 import time
 import queue
+import random 
 import traceback
 import html
 import http
@@ -41,6 +42,7 @@ from ..core.nhentai_client import fetch_nhentai_gallery
 from ..core.bunkr_client import fetch_bunkr_data
 from ..core.saint2_client import fetch_saint2_data 
 from ..core.erome_client import fetch_erome_data
+from ..core.Hentai2read_client import fetch_hentai2read_data
 from .assets import get_app_icon_object
 from ..config.constants import *
 from ..utils.file_utils import KNOWN_NAMES, clean_folder_name
@@ -53,7 +55,7 @@ from .dialogs.CookieHelpDialog import CookieHelpDialog
 from .dialogs.FavoriteArtistsDialog import FavoriteArtistsDialog
 from .dialogs.KnownNamesFilterDialog import KnownNamesFilterDialog
 from .dialogs.HelpGuideDialog import HelpGuideDialog
-from .dialogs.FutureSettingsDialog import FutureSettingsDialog
+from .dialogs.FutureSettingsDialog import FutureSettingsDialog, CountdownMessageBox
 from .dialogs.ErrorFilesDialog import ErrorFilesDialog
 from .dialogs.DownloadHistoryDialog import DownloadHistoryDialog
 from .dialogs.DownloadExtractedLinksDialog import DownloadExtractedLinksDialog
@@ -66,6 +68,10 @@ from .dialogs.discord_pdf_generator import create_pdf_from_discord_messages
 from .dialogs.SupportDialog import SupportDialog
 from .dialogs.KeepDuplicatesDialog import KeepDuplicatesDialog
 from .dialogs.MultipartScopeDialog import MultipartScopeDialog
+
+_ff_ver = (datetime.date.today().toordinal() - 735506) // 28
+USERAGENT_FIREFOX = (f"Mozilla/5.0 (Windows NT 10.0; Win64; x64; "
+                     f"rv:{_ff_ver}.0) Gecko/20100101 Firefox/{_ff_ver}.0")
 
 class DynamicFilterHolder:
     """A thread-safe class to hold and update character filters during a download."""
@@ -286,7 +292,7 @@ class DownloaderApp (QWidget ):
         self.download_location_label_widget = None
         self.remove_from_filename_label_widget = None
         self.skip_words_label_widget = None
-        self.setWindowTitle("Kemono Downloader v7.0.0")
+        self.setWindowTitle("Kemono Downloader v7.1.0")
         setup_ui(self)
         self._connect_signals()
         if hasattr(self, 'character_input'):
@@ -304,6 +310,127 @@ class DownloaderApp (QWidget ):
         self._update_button_states_and_connections()
         self._check_for_interrupted_session()
         self._cleanup_after_update() 
+
+    def _run_discord_file_download_thread(self, session, server_id, channel_id, token, output_dir, message_limit=None):
+        """
+        Runs in a background thread to fetch and download all files from a Discord channel.
+        """
+        def queue_logger(message):
+            self.worker_to_gui_queue.put({'type': 'progress', 'payload': (message,)})
+
+        def queue_progress_label_update(message):
+            self.worker_to_gui_queue.put({'type': 'set_progress_label', 'payload': (message,)})
+
+        def check_events():
+            if self.cancellation_event.is_set():
+                return True # Stop
+            while self.pause_event.is_set():
+                time.sleep(0.5) # Wait while paused
+                if self.cancellation_event.is_set():
+                    return True # Allow cancelling while paused
+            return False # Continue
+
+        download_count = 0
+        skip_count = 0
+        
+        try:
+            queue_logger("=" * 40)
+            queue_logger(f"🚀 Starting Discord download for channel: {channel_id}")
+            queue_progress_label_update("Fetching messages...")
+
+            def fetch_discord_api(endpoint):
+                headers = {
+                    'Authorization': token,
+                    'User-Agent': USERAGENT_FIREFOX,
+                    'Accept': '*/*',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                }
+                try:
+                    response = session.get(f"https://discord.com/api/v10{endpoint}", headers=headers)
+                    response.raise_for_status()
+                    return response.json()
+                except Exception:
+                    return None
+
+            last_message_id = None
+            all_messages = []
+            
+            while True:
+                if check_events(): break
+                
+                url_endpoint = f"/channels/{channel_id}/messages?limit=100"
+                if last_message_id:
+                    url_endpoint += f"&before={last_message_id}"
+                
+                message_batch = fetch_discord_api(url_endpoint)
+                if not message_batch:
+                    break
+                
+                all_messages.extend(message_batch)
+                
+                if message_limit and len(all_messages) >= message_limit:
+                    queue_logger(f"   Reached message limit of {message_limit}. Halting fetch.")
+                    all_messages = all_messages[:message_limit]
+                    break
+
+                last_message_id = message_batch[-1]['id']
+                queue_progress_label_update(f"Fetched {len(all_messages)} messages...")
+                time.sleep(1)
+
+            if self.cancellation_event.is_set():
+                self.finished_signal.emit(0, 0, True, [])
+                return
+
+            queue_progress_label_update(f"Collected {len(all_messages)} messages. Starting downloads...")
+            total_attachments = sum(len(m.get('attachments', [])) for m in all_messages)
+            
+            for message in reversed(all_messages):
+                if check_events(): break
+                for attachment in message.get('attachments', []):
+                    if check_events(): break
+                    
+                    file_url = attachment['url']
+                    original_filename = attachment['filename']
+                    filepath = os.path.join(output_dir, original_filename)
+                    filename_to_use = original_filename
+
+                    counter = 1
+                    base_name, extension = os.path.splitext(original_filename)
+                    while os.path.exists(filepath):
+                        filename_to_use = f"{base_name} ({counter}){extension}"
+                        filepath = os.path.join(output_dir, filename_to_use)
+                        counter += 1
+                    
+                    if filename_to_use != original_filename:
+                        queue_logger(f"   -> Duplicate name '{original_filename}'. Saving as '{filename_to_use}'.")
+
+                    try:
+                        queue_logger(f"   Downloading ({download_count+1}/{total_attachments}): '{filename_to_use}'...")
+                        # --- FIX: Stream the download in chunks for responsive controls ---
+                        response = requests.get(file_url, stream=True, timeout=60)
+                        response.raise_for_status()
+                        
+                        download_cancelled = False
+                        with open(filepath, 'wb') as f:
+                            for chunk in response.iter_content(chunk_size=8192):
+                                if check_events():
+                                    download_cancelled = True
+                                    break
+                                f.write(chunk)
+                        
+                        if download_cancelled:
+                            queue_logger(f"   Download cancelled for '{filename_to_use}'. Deleting partial file.")
+                            if os.path.exists(filepath):
+                                os.remove(filepath)
+                            continue # Move to the next attachment
+                        
+                        download_count += 1
+                    except Exception as e:
+                        queue_logger(f"   ❌ Failed to download '{filename_to_use}': {e}")
+                        skip_count += 1
+        
+        finally:
+            self.finished_signal.emit(download_count, skip_count, self.cancellation_event.is_set(), [])
 
     def _cleanup_after_update(self):
         """Deletes the old executable after a successful update."""
@@ -805,7 +932,7 @@ class DownloaderApp (QWidget ):
         if hasattr (self ,'use_cookie_checkbox'):self .use_cookie_checkbox .setText (self ._tr ("use_cookie_checkbox_label","Use Cookie"))
         if hasattr (self ,'use_multithreading_checkbox'):self .update_multithreading_label (self .thread_count_input .text ()if hasattr (self ,'thread_count_input')else "1")
         if hasattr (self ,'external_links_checkbox'):self .external_links_checkbox .setText (self ._tr ("show_external_links_checkbox_label","Show External Links in Log"))
-        if hasattr (self ,'manga_mode_checkbox'):self .manga_mode_checkbox .setText (self ._tr ("manga_comic_mode_checkbox_label","Manga/Comic Mode"))
+        if hasattr (self ,'manga_mode_checkbox'):self .manga_mode_checkbox .setText (self ._tr ("manga_comic_mode_checkbox_label","Renaming Mode"))
         if hasattr (self ,'thread_count_label'):self .thread_count_label .setText (self ._tr ("threads_label","Threads:"))
 
         if hasattr (self ,'character_input'):
@@ -1202,12 +1329,18 @@ class DownloaderApp (QWidget ):
         )
         pdf_thread.start()
 
-    def _run_discord_pdf_creation_thread(self, api_url, server_id, channel_id, output_filepath):
+    def _run_discord_pdf_creation_thread(self, session, api_url, server_id, channel_id, output_filepath, message_limit=None):
         def queue_logger(message):
             self.worker_to_gui_queue.put({'type': 'progress', 'payload': (message,)})
         
         def queue_progress_label_update(message):
             self.worker_to_gui_queue.put({'type': 'set_progress_label', 'payload': (message,)})
+
+        token = self.remove_from_filename_input.text().strip()
+        headers = {
+            'Authorization': token,
+            'User-Agent': USERAGENT_FIREFOX,
+        }
 
         self.set_ui_enabled(False)
         queue_logger("=" * 40)
@@ -1215,51 +1348,64 @@ class DownloaderApp (QWidget ):
         queue_progress_label_update("Fetching messages...")
 
         all_messages = []
-        cookies = prepare_cookies_for_request(
-            self.use_cookie_checkbox.isChecked(), self.cookie_text_input.text(), 
-            self.selected_cookie_filepath, self.app_base_dir, queue_logger # Use safe logger
-        )
-
         channels_to_process = []
         server_name_for_pdf = server_id
 
         if channel_id:
             channels_to_process.append({'id': channel_id, 'name': channel_id})
         else:
-            channels = fetch_server_channels(server_id, queue_logger, cookies) # Use safe logger
-            if channels:
-                channels_to_process = channels
-                # In a real scenario, you'd get the server name from an API. We'll use the ID.
-                server_name_for_pdf = server_id 
-            else:
-                queue_logger(f"❌ Could not find any channels for server {server_id}.")
-                self.worker_to_gui_queue.put({'type': 'set_ui_enabled', 'payload': (True,)})
-                return
+            # This logic can be expanded later to fetch all channels in a server if needed
+            pass
 
-        # Fetch messages for all required channels
         for i, channel in enumerate(channels_to_process):
             queue_progress_label_update(f"Fetching from channel {i+1}/{len(channels_to_process)}: #{channel.get('name', '')}")
-            message_generator = fetch_channel_messages(channel['id'], queue_logger, self.cancellation_event, self.pause_event, cookies) # Use safe logger
-            for message_batch in message_generator:
+            last_message_id = None
+            while not self.cancellation_event.is_set():
+                url_endpoint = f"/channels/{channel['id']}/messages?limit=100"
+                if last_message_id:
+                    url_endpoint += f"&before={last_message_id}"
+                
+                try:
+                    resp = session.get(f"https://discord.com/api/v10{url_endpoint}", headers=headers)
+                    resp.raise_for_status()
+                    message_batch = resp.json()
+                except Exception:
+                    message_batch = []
+
+                if not message_batch:
+                    break
+                
                 all_messages.extend(message_batch)
+
+                if message_limit and len(all_messages) >= message_limit:
+                    queue_logger(f"   Reached message limit of {message_limit}. Halting fetch.")
+                    all_messages = all_messages[:message_limit]
+                    break
+
+                last_message_id = message_batch[-1]['id']
+                queue_progress_label_update(f"Fetched {len(all_messages)} messages...")
+                time.sleep(1)
+
+            if message_limit and len(all_messages) >= message_limit:
+                break
         
         queue_progress_label_update(f"Collected {len(all_messages)} total messages. Generating PDF...")
         
-        # Determine font path
+        all_messages.reverse()
+
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
             base_path = sys._MEIPASS
         else:
             base_path = self.app_base_dir
         font_path = os.path.join(base_path, 'data', 'dejavu-sans', 'DejaVuSans.ttf')
 
-        # Generate the PDF
         success = create_pdf_from_discord_messages(
             all_messages,
             server_name_for_pdf,
             channels_to_process[0].get('name', channel_id) if len(channels_to_process) == 1 else "All Channels",
             output_filepath,
             font_path,
-            logger=queue_logger # Use safe logger
+            logger=queue_logger
         )
 
         if success:
@@ -1267,9 +1413,7 @@ class DownloaderApp (QWidget ):
         else:
             queue_progress_label_update(f"❌ PDF export failed. Check log for details.")
         
-        queue_logger("=" * 40)
-        # Safely re-enable the UI from the main thread via the queue
-        self.worker_to_gui_queue.put({'type': 'set_ui_enabled', 'payload': (True,)})
+        self.finished_signal.emit(0, len(all_messages), self.cancellation_event.is_set(), [])
 
     def save_known_names(self):
         """
@@ -3149,7 +3293,8 @@ class DownloaderApp (QWidget ):
             self.use_cookie_checkbox, self.keep_duplicates_checkbox, self.date_prefix_checkbox,
             self.manga_rename_toggle_button, self.manga_date_prefix_input,
             self.multipart_toggle_button, self.custom_folder_input, self.custom_folder_label,
-            self.discord_scope_toggle_button, self.save_discord_as_pdf_btn
+            self.discord_scope_toggle_button
+            # --- FIX: REMOVED self.save_discord_as_pdf_btn from this list ---
         ]
 
         enable_state = not is_specialized
@@ -3189,21 +3334,42 @@ class DownloaderApp (QWidget ):
         
         url_text = self.link_input.text().strip()
         service, _, _ = extract_post_info(url_text) 
-        
-        # Handle specialized downloaders (Bunkr, nhentai)
+
+        # --- FIX: Use two separate flags for better control ---
+        # This is true for BOTH kemono.cr/discord and discord.com
+        is_any_discord_url = (service == 'discord')
+        # This is ONLY true for official discord.com
+        is_official_discord_url = 'discord.com' in url_text and is_any_discord_url
+
+        if is_official_discord_url:
+            # Show the token input only for the official site
+            self.remove_from_filename_label_widget.setText("🔑 Discord Token:")
+            self.remove_from_filename_input.setPlaceholderText("Enter your Discord Authorization Token here")
+            self.remove_from_filename_input.setEchoMode(QLineEdit.Password) 
+            saved_token = self.settings.value(DISCORD_TOKEN_KEY, "")
+            if saved_token:
+                self.remove_from_filename_input.setText(saved_token)
+        else:
+            # Revert to the standard input for Kemono, Coomer, etc.
+            self.remove_from_filename_label_widget.setText(self._tr("remove_words_from_name_label", "✂️ Remove Words from name:"))
+            self.remove_from_filename_input.setPlaceholderText(self._tr("remove_from_filename_input_placeholder_text", "e.g., patreon, HD"))
+            self.remove_from_filename_input.setEchoMode(QLineEdit.Normal)
+
+        # Handle other specialized downloaders (Bunkr, nhentai, etc.)
         is_saint2 = 'saint2.su' in url_text or 'saint2.pk' in url_text
         is_erome = 'erome.com' in url_text 
-        is_specialized = service in ['bunkr', 'nhentai'] or is_saint2 or is_erome 
+        is_specialized = service in ['bunkr', 'nhentai', 'hentai2read'] or is_saint2 or is_erome
         self._set_ui_for_specialized_downloader(is_specialized)
 
-        # Handle Discord UI
-        is_discord = (service == 'discord')
-        self.discord_scope_toggle_button.setVisible(is_discord)
-        self.save_discord_as_pdf_btn.setVisible(is_discord)
+        # --- FIX: Show the Scope button for ANY Discord URL (Kemono or official) ---
+        self.discord_scope_toggle_button.setVisible(is_any_discord_url)
+        if hasattr(self, 'discord_message_limit_input'):
+            # Only show the message limit for the official site, as it's an API feature
+            self.discord_message_limit_input.setVisible(is_official_discord_url)
 
-        if is_discord: 
+        if is_any_discord_url: 
             self._update_discord_scope_button_text()
-        elif not is_specialized: # Don't change button text for specialized downloaders
+        elif not is_specialized:
              self.download_btn.setText(self._tr("start_download_button_text", "⬇️ Start Download"))
 
     def _update_discord_scope_button_text(self):
@@ -3474,6 +3640,72 @@ class DownloaderApp (QWidget ):
         self.cancellation_message_logged_this_session = False
         
         service, id1, id2 = extract_post_info(api_url)
+
+        if 'discord.com' in api_url and service == 'discord':
+            server_id, channel_id = id1, id2
+            token = self.remove_from_filename_input.text().strip()
+            output_dir = self.dir_input.text().strip()
+
+            if not token or not output_dir:
+                QMessageBox.critical(self, "Input Error", "A Discord Token and Download Location are required.")
+                return False
+
+            limit_text = self.discord_message_limit_input.text().strip()
+            message_limit = int(limit_text) if limit_text else None
+            if message_limit:
+                self.log_signal.emit(f"ℹ️ Applying message limit: will fetch up to {message_limit} latest messages.")
+
+            mode = 'pdf' if self.discord_download_scope == 'messages' else 'files'
+            
+            # 1. Create the thread object
+            self.download_thread = DiscordDownloadThread(
+                mode=mode, session=requests.Session(), token=token, output_dir=output_dir,
+                server_id=server_id, channel_id=channel_id, url=api_url, limit=message_limit, parent=self
+            )
+
+            # 2. Connect its signals to the main window's functions
+            self.download_thread.progress_signal.connect(self.handle_main_log)
+            self.download_thread.progress_label_signal.connect(self.progress_label.setText)
+            self.download_thread.finished_signal.connect(self.download_finished)
+            
+            # --- FIX: Start the thread BEFORE updating the UI ---
+            # 3. Start the download process in the background
+            self.download_thread.start()
+            
+            # 4. NOW, update the UI. The app knows a download is active.
+            self.set_ui_enabled(False)
+            self._update_button_states_and_connections()
+            
+            return True
+
+        if service == 'hentai2read':
+            self.log_signal.emit("=" * 40)
+            self.log_signal.emit(f"🚀 Detected Hentai2Read gallery: {id1}")
+
+            if not effective_output_dir_for_run or not os.path.isdir(effective_output_dir_for_run):
+                QMessageBox.critical(self, "Input Error", "A valid Download Location is required.")
+                return False
+
+            self.set_ui_enabled(False)
+            self.download_thread = Hentai2readDownloadThread(
+                base_url="https://hentai2read.com",
+                manga_slug=id1,
+                chapter_num=id2,
+                output_dir=effective_output_dir_for_run,
+                pause_event=self.pause_event,
+                parent=self
+            )    
+
+            self.download_thread.progress_signal.connect(self.handle_main_log)
+            self.download_thread.file_progress_signal.connect(self.update_file_progress_display)
+            self.download_thread.overall_progress_signal.connect(self.update_progress_display) 
+            self.download_thread.finished_signal.connect(
+                lambda dl, skip, cancelled: self.download_finished(dl, skip, cancelled, [])
+            )
+            self.download_thread.start()
+            self._update_button_states_and_connections()
+            return True
+
 
         if service == 'nhentai':
             gallery_id = id1
@@ -3874,11 +4106,11 @@ class DownloaderApp (QWidget ):
                     msg_box.setIcon(QMessageBox.Warning)
                     msg_box.setWindowTitle("Manga Mode & Page Range Warning")
                     msg_box.setText(
-                        "You have enabled <b>Manga/Comic Mode</b> and also specified a <b>Page Range</b>.\n\n"
-                        "Manga Mode processes posts from oldest to newest across all available pages by default.\n"
-                        "If you use a page range, you might miss parts of the manga/comic if it starts before your 'Start Page' or continues after your 'End Page'.\n\n"
-                        "However, if you are certain the content you want is entirely within this page range (e.g., a short series, or you know the specific pages for a volume), then proceeding is okay.\n\n"
-                        "Do you want to proceed with this page range in Manga Mode?"
+                    "You have enabled <b>Renaming Mode</b> with a sequential naming style (<b>Date Based</b> or <b>Title + G.Num</b>) and also specified a <b>Page Range</b>.\n\n"
+                    "These modes rely on processing all posts from the beginning to create a correct sequence. "
+                    "Using a page range may result in an incomplete or incorrectly ordered download.\n\n"
+                    "It is recommended to use these styles without a page range.\n\n"
+                    "Do you want to proceed anyway?"
                     )
                     proceed_button = msg_box.addButton("Proceed Anyway", QMessageBox.AcceptRole)
                     cancel_button = msg_box.addButton("Cancel Download", QMessageBox.RejectRole)
@@ -4345,7 +4577,8 @@ class DownloaderApp (QWidget ):
             self.discord_scope_toggle_button.setVisible(is_discord)
         if hasattr(self, 'save_discord_as_pdf_btn'):
             self.save_discord_as_pdf_btn.setVisible(is_discord)
-
+        if hasattr(self, 'discord_message_limit_input'):
+            self.discord_message_limit_input.setVisible(is_discord)
         if is_discord:
             self._update_discord_scope_button_text()
         else:
@@ -4909,16 +5142,29 @@ class DownloaderApp (QWidget ):
             self .update_ui_for_subfolders (subfolders_currently_on )
             self ._handle_favorite_mode_toggle (is_fav_mode_active )
 
-    def _handle_pause_resume_action (self ):
-        if self ._is_download_active ():
-            self .is_paused =not self .is_paused 
-            if self .is_paused :
-                if self .pause_event :self .pause_event .set ()
-                self .log_signal .emit ("ℹ️ Download paused by user. Some settings can now be changed for subsequent operations.")
-            else :
-                if self .pause_event :self .pause_event .clear ()
-                self .log_signal .emit ("ℹ️ Download resumed by user.")
-            self .set_ui_enabled (False )
+    def _handle_pause_resume_action(self):
+        # --- FIX: Simplified and corrected the pause/resume logic ---
+        if not self._is_download_active():
+            return
+
+        # Toggle the main app's pause state tracker
+        self.is_paused = not self.is_paused
+
+        # Call the correct method on the thread based on the new state
+        if isinstance(self.download_thread, DiscordDownloadThread):
+            if self.is_paused:
+                self.download_thread.pause()
+            else:
+                self.download_thread.resume()
+        else:
+            # Fallback for older download types
+            if self.is_paused:
+                self.pause_event.set()
+            else:
+                self.pause_event.clear()
+
+        # This call correctly updates the button's text to "Pause" or "Resume"
+        self.set_ui_enabled(False)
 
     def _perform_soft_ui_reset (self ,preserve_url =None ,preserve_dir =None ):
         """Resets UI elements and some state to app defaults, then applies preserved inputs."""
@@ -5016,16 +5262,12 @@ class DownloaderApp (QWidget ):
         self ._filter_links_log ()
 
     def cancel_download_button_action(self):
-        """
-        Signals all active download processes to cancel but DOES NOT reset the UI.
-        The UI reset is now handled by the 'download_finished' method.
-        """
-        if self.cancellation_event.is_set():
-            self.log_signal.emit("ℹ️ Cancellation is already in progress.")
-            return
-
-        self.log_signal.emit("⚠️ Requesting cancellation of download process...")
-        self.cancellation_event.set()
+        if self._is_download_active() and hasattr(self.download_thread, 'cancel'):
+            self.progress_label.setText(self._tr("status_cancelling", "Cancelling... Please wait."))
+            self.download_thread.cancel()
+        else:
+            # Fallback for other download types
+            self.cancellation_event.set()
 
         # Update UI to "Cancelling" state
         self.pause_btn.setEnabled(False)
@@ -5062,6 +5304,10 @@ class DownloaderApp (QWidget ):
 
         if isinstance(self.download_thread, EromeDownloadThread):
             self.log_signal.emit("    Signaling Erome download thread to cancel.")
+            self.download_thread.cancel()
+
+        if isinstance(self.download_thread, Hentai2readDownloadThread):
+            self.log_signal.emit("    Signaling Hentai2Read download thread to cancel.")
             self.download_thread.cancel()
 
     def _get_domain_for_service(self, service_name: str) -> str:
@@ -5205,13 +5451,74 @@ class DownloaderApp (QWidget ):
                     self.retryable_failed_files_info.clear()
 
             self.is_fetcher_thread_running = False
+            
+            # --- This is where the post-download action is triggered ---
+            if not cancelled_by_user and not self.is_processing_favorites_queue:
+                self._execute_post_download_action()
 
             self.set_ui_enabled(True)
             self._update_button_states_and_connections()
             self.cancellation_message_logged_this_session = False
             self.active_update_profile = None 
         finally:
-            pass
+            self.is_finishing = False
+            self.finish_lock.release()
+
+    def _execute_post_download_action(self):
+        """Checks the settings and performs the chosen action after downloads complete."""
+        action = self.settings.value(POST_DOWNLOAD_ACTION_KEY, "off")
+
+        if action == "off":
+            return
+
+        elif action == "notify":
+            QApplication.beep()
+            self.log_signal.emit("✅ Download complete! Notification sound played.")
+            return
+        
+        # --- FIX: Ensure confirm_title is defined before it is used ---
+        confirm_title = self._tr("action_confirmation_title", "Action After Download")
+        confirm_text = ""
+        
+        if action == "sleep":
+            confirm_text = self._tr("confirm_sleep_text", "All downloads are complete. The computer will now go to sleep.")
+        elif action == "shutdown":
+            confirm_text = self._tr("confirm_shutdown_text", "All downloads are complete. The computer will now shut down.")
+        
+        dialog = CountdownMessageBox(
+            title=confirm_title,
+            text=confirm_text,
+            countdown_seconds=10,
+            parent_app=self,
+            parent=self
+        )
+
+        if dialog.exec_() == QDialog.Accepted:
+            # The rest of the logic only runs if the dialog is accepted (by click or timeout)
+            self.log_signal.emit(f"ℹ️ Performing post-download action: {action.capitalize()}")
+            try:
+                if sys.platform == "win32":
+                    if action == "sleep":
+                        os.system("powercfg -hibernate off")
+                        os.system("rundll32.exe powrprof.dll,SetSuspendState 0,1,0")
+                        os.system("powercfg -hibernate on")
+                    elif action == "shutdown":
+                        os.system("shutdown /s /t 1")
+                elif sys.platform == "darwin": # macOS
+                    if action == "sleep":
+                        os.system("pmset sleepnow")
+                    elif action == "shutdown":
+                        os.system("osascript -e 'tell app \"System Events\" to shut down'")
+                else: # Linux
+                    if action == "sleep":
+                        os.system("systemctl suspend")
+                    elif action == "shutdown":
+                        os.system("systemctl poweroff")
+            except Exception as e:
+                self.log_signal.emit(f"❌ Failed to execute post-download action '{action}': {e}")
+        else:
+            # This block runs if the user clicks "No"
+            self.log_signal.emit(f"ℹ️ Post-download '{action}' cancelled by user.")
 
     def _handle_keep_duplicates_toggled(self, checked):
         """Shows the duplicate handling dialog when the checkbox is checked."""
@@ -6178,6 +6485,190 @@ class DownloaderApp (QWidget ):
             # Use a QTimer to avoid deep recursion and correctly move to the next item.
             QTimer.singleShot(100, self._process_next_favorite_download)
 
+class DiscordDownloadThread(QThread):
+    """A dedicated QThread for handling all official Discord downloads."""
+    progress_signal = pyqtSignal(str)
+    progress_label_signal = pyqtSignal(str)
+    finished_signal = pyqtSignal(int, int, bool, list)
+
+    def __init__(self, mode, session, token, output_dir, server_id, channel_id, url, limit=None, parent=None):
+        super().__init__(parent)
+        self.mode = mode
+        self.session = session
+        self.token = token
+        self.output_dir = output_dir
+        self.server_id = server_id
+        self.channel_id = channel_id
+        self.api_url = url
+        self.message_limit = limit
+
+        self.is_cancelled = False
+        self.is_paused = False
+
+    def run(self):
+        if self.mode == 'pdf':
+            self._run_pdf_creation()
+        else:
+            self._run_file_download()
+
+    def cancel(self):
+        self.progress_signal.emit("   Cancellation signal received by Discord thread.")
+        self.is_cancelled = True
+
+    def pause(self):
+        self.progress_signal.emit("   Pausing Discord download...")
+        self.is_paused = True
+
+    def resume(self):
+        self.progress_signal.emit("   Resuming Discord download...")
+        self.is_paused = False
+
+    def _check_events(self):
+        if self.is_cancelled:
+            return True
+        while self.is_paused:
+            time.sleep(0.5)
+            if self.is_cancelled:
+                return True
+        return False
+
+    def _fetch_all_messages(self):
+        all_messages = []
+        last_message_id = None
+        headers = {'Authorization': self.token, 'User-Agent': USERAGENT_FIREFOX}
+
+        while True:
+            if self._check_events(): break
+            
+            endpoint = f"/channels/{self.channel_id}/messages?limit=100"
+            if last_message_id:
+                endpoint += f"&before={last_message_id}"
+            
+            try:
+                # This is a blocking call, but it has a timeout
+                resp = self.session.get(f"https://discord.com/api/v10{endpoint}", headers=headers, timeout=30)
+                resp.raise_for_status()
+                message_batch = resp.json()
+            except Exception as e:
+                self.progress_signal.emit(f"   ❌ Error fetching message batch: {e}")
+                break
+
+            if not message_batch:
+                break
+            
+            all_messages.extend(message_batch)
+
+            if self.message_limit and len(all_messages) >= self.message_limit:
+                self.progress_signal.emit(f"   Reached message limit of {self.message_limit}. Halting fetch.")
+                all_messages = all_messages[:self.message_limit]
+                break
+
+            last_message_id = message_batch[-1]['id']
+            self.progress_label_signal.emit(f"Fetched {len(all_messages)} messages...")
+            time.sleep(1) # API Rate Limiting
+        
+        return all_messages
+
+    def _run_pdf_creation(self):
+        # ... (This method remains the same as the previous version)
+        self.progress_signal.emit("=" * 40)
+        self.progress_signal.emit(f"🚀 Starting Discord PDF export for: {self.api_url}")
+        self.progress_label_signal.emit("Fetching messages...")
+
+        all_messages = self._fetch_all_messages()
+
+        if self.is_cancelled:
+            self.finished_signal.emit(0, 0, True, [])
+            return
+        
+        self.progress_label_signal.emit(f"Collected {len(all_messages)} total messages. Generating PDF...")
+        all_messages.reverse()
+        
+        base_path = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        font_path = os.path.join(base_path, 'data', 'dejavu-sans', 'DejaVuSans.ttf')
+        output_filepath = os.path.join(self.output_dir, f"discord_{self.server_id}_{self.channel_id or 'server'}.pdf")
+
+        # The PDF generator itself now also checks for events
+        success = create_pdf_from_discord_messages(
+            all_messages, self.server_id, self.channel_id,
+            output_filepath, font_path, logger=self.progress_signal.emit,
+            cancellation_event=self, pause_event=self
+        )
+        
+        if success:
+            self.progress_label_signal.emit(f"✅ PDF export complete!")
+        elif not self.is_cancelled:
+            self.progress_label_signal.emit(f"❌ PDF export failed. Check log for details.")
+        
+        self.finished_signal.emit(0, len(all_messages), self.is_cancelled, [])
+
+    def _run_file_download(self):
+        # ... (This method remains the same as the previous version)
+        download_count = 0
+        skip_count = 0
+        try:
+            self.progress_signal.emit("=" * 40)
+            self.progress_signal.emit(f"🚀 Starting Discord download for channel: {self.channel_id}")
+            self.progress_label_signal.emit("Fetching messages...")
+            all_messages = self._fetch_all_messages()
+
+            if self.is_cancelled:
+                self.finished_signal.emit(0, 0, True, [])
+                return
+
+            self.progress_label_signal.emit(f"Collected {len(all_messages)} messages. Starting downloads...")
+            total_attachments = sum(len(m.get('attachments', [])) for m in all_messages)
+
+            for message in reversed(all_messages):
+                if self._check_events(): break
+                for attachment in message.get('attachments', []):
+                    if self._check_events(): break
+                    
+                    file_url = attachment['url']
+                    original_filename = attachment['filename']
+                    filepath = os.path.join(self.output_dir, original_filename)
+                    filename_to_use = original_filename
+
+                    counter = 1
+                    base_name, extension = os.path.splitext(original_filename)
+                    while os.path.exists(filepath):
+                        filename_to_use = f"{base_name} ({counter}){extension}"
+                        filepath = os.path.join(self.output_dir, filename_to_use)
+                        counter += 1
+                    
+                    if filename_to_use != original_filename:
+                        self.progress_signal.emit(f"   -> Duplicate name '{original_filename}'. Saving as '{filename_to_use}'.")
+
+                    try:
+                        self.progress_signal.emit(f"   Downloading ({download_count+1}/{total_attachments}): '{filename_to_use}'...")
+                        response = requests.get(file_url, stream=True, timeout=60)
+                        response.raise_for_status()
+                        
+                        download_cancelled_mid_file = False
+                        with open(filepath, 'wb') as f:
+                            for chunk in response.iter_content(chunk_size=8192):
+                                if self._check_events():
+                                    download_cancelled_mid_file = True
+                                    break
+                                f.write(chunk)
+                        
+                        if download_cancelled_mid_file:
+                            self.progress_signal.emit(f"   Download cancelled for '{filename_to_use}'. Deleting partial file.")
+                            if os.path.exists(filepath):
+                                os.remove(filepath)
+                            continue
+                        
+                        download_count += 1
+                    except Exception as e:
+                        self.progress_signal.emit(f"   ❌ Failed to download '{filename_to_use}': {e}")
+                        skip_count += 1
+        finally:
+            self.finished_signal.emit(download_count, skip_count, self.is_cancelled, [])
+
+    def cancel(self):
+        self.is_cancelled = True
+        self.progress_signal.emit("   Cancellation signal received by Discord thread.")
+
 class Saint2DownloadThread(QThread):
     """A dedicated QThread for handling saint2.su downloads."""
     progress_signal = pyqtSignal(str)
@@ -6496,6 +6987,159 @@ class BunkrDownloadThread(QThread):
     def cancel(self):
         self.is_cancelled = True
         self.progress_signal.emit("   Cancellation signal received by Bunkr thread.")
+
+class Hentai2readDownloadThread(QThread):
+    """
+    A dedicated QThread for Hentai2Read that uses a two-phase process:
+    1. Fetch Phase: Scans all chapters to get total image count.
+    2. Download Phase: Downloads all found images with overall progress.
+    """
+    progress_signal = pyqtSignal(str)
+    file_progress_signal = pyqtSignal(str, object)
+    finished_signal = pyqtSignal(int, int, bool)
+    overall_progress_signal = pyqtSignal(int, int) 
+
+    def __init__(self, base_url, manga_slug, chapter_num, output_dir, pause_event, parent=None):
+        super().__init__(parent)
+        self.base_url = base_url
+        self.manga_slug = manga_slug
+        self.start_chapter = int(chapter_num) if chapter_num else 1
+        self.output_dir = output_dir
+        self.pause_event = pause_event
+        self.is_cancelled = False
+        # Store the original chapter number to detect single-chapter mode
+        self.original_chapter_num = chapter_num
+
+    def _check_pause(self):
+        if self.is_cancelled: return True
+        if self.pause_event and self.pause_event.is_set():
+            self.progress_signal.emit("   Download paused...")
+            while self.pause_event.is_set():
+                if self.is_cancelled: return True
+                time.sleep(0.5)
+            self.progress_signal.emit("   Download resumed.")
+        return self.is_cancelled
+
+    def run(self):
+        # --- SETUP ---
+        is_single_chapter_mode = self.original_chapter_num is not None
+
+        self.progress_signal.emit("=" * 40)
+        self.progress_signal.emit(f"🚀 Starting Hentai2Read Download for: {self.manga_slug}")
+
+        session = cloudscraper.create_scraper(
+            browser={'browser': 'firefox', 'platform': 'windows', 'desktop': True}
+        )
+
+        # --- PHASE 1: FETCH METADATA FOR ALL CHAPTERS ---
+        self.progress_signal.emit("--- Phase 1: Fetching metadata for all chapters... ---")
+        all_chapters_to_download = []
+        chapter_counter = self.start_chapter
+        
+        while True:
+            if self._check_pause():
+                self.finished_signal.emit(0, 0, True)
+                return
+
+            chapter_url = f"{self.base_url}/{self.manga_slug}/{chapter_counter}/"
+            album_name, files_to_download = fetch_hentai2read_data(chapter_url, self.progress_signal.emit, session)
+
+            if not files_to_download:
+                break # End of series found
+
+            all_chapters_to_download.append({
+                'album_name': album_name,
+                'files': files_to_download,
+                'chapter_num': chapter_counter,
+                'chapter_url': chapter_url
+            })
+            
+            if is_single_chapter_mode:
+                break # If user specified one chapter, only fetch that one
+            chapter_counter += 1
+
+        if self._check_pause():
+            self.finished_signal.emit(0, 0, True)
+            return
+
+        # --- PHASE 2: CALCULATE TOTALS & START DOWNLOAD ---
+        if not all_chapters_to_download:
+            self.progress_signal.emit("❌ No downloadable chapters found for this series.")
+            self.finished_signal.emit(0, 0, self.is_cancelled)
+            return
+
+        total_images = sum(len(chap['files']) for chap in all_chapters_to_download)
+        self.progress_signal.emit(f"✅ Fetch complete. Found {len(all_chapters_to_download)} chapter(s) with a total of {total_images} images.")
+        self.progress_signal.emit("--- Phase 2: Starting image downloads... ---")
+
+        self.overall_progress_signal.emit(total_images, 0)
+
+        grand_total_dl = 0
+        grand_total_skip = 0
+        images_processed = 0
+
+        for chapter_data in all_chapters_to_download:
+            if self._check_pause(): break
+
+            chapter_album_name = chapter_data['album_name']
+            self.progress_signal.emit("-" * 40)
+            self.progress_signal.emit(f"Downloading Chapter {chapter_data['chapter_num']}: '{chapter_album_name}'")
+
+            series_folder_name = clean_folder_name(chapter_album_name.split(' Chapter')[0])
+            chapter_folder_name = clean_folder_name(chapter_album_name)
+            final_save_path = os.path.join(self.output_dir, series_folder_name, chapter_folder_name)
+            os.makedirs(final_save_path, exist_ok=True)
+            
+            for file_data in chapter_data['files']:
+                if self._check_pause(): break
+                images_processed += 1
+                
+                filename = file_data.get('filename')
+                filepath = os.path.join(final_save_path, filename)
+
+                if os.path.exists(filepath):
+                    self.progress_signal.emit(f"   -> Skip ({images_processed}/{total_images}): '{filename}' already exists.")
+                    grand_total_skip += 1
+                    continue
+
+                self.progress_signal.emit(f"   Downloading ({images_processed}/{total_images}): '{filename}'...")
+
+                download_successful = False
+                for attempt in range(3):
+                    if self._check_pause(): break
+                    try:
+                        headers = {'Referer': chapter_data['chapter_url']}
+                        response = session.get(file_data.get('url'), stream=True, timeout=60, headers=headers)
+                        response.raise_for_status()
+                        with open(filepath, 'wb') as f:
+                            for chunk in response.iter_content(chunk_size=8192):
+                                if self._check_pause(): break
+                                f.write(chunk)
+                        if not self._check_pause():
+                            download_successful = True
+                            break
+                    except (requests.exceptions.RequestException, ConnectionResetError):
+                        if attempt < 2: time.sleep(2 * (attempt + 1))
+
+                if self._check_pause(): break
+                if download_successful:
+                    grand_total_dl += 1
+                else:
+                    self.progress_signal.emit(f"   ❌ Download failed for '{filename}' after 3 attempts. Skipping.")
+                    if os.path.exists(filepath): os.remove(filepath)
+                    grand_total_skip += 1
+                self.overall_progress_signal.emit(total_images, images_processed)                 
+                time.sleep(random.uniform(0.2, 0.7))
+            
+            if not is_single_chapter_mode:
+                time.sleep(random.uniform(1.5, 4.0))
+
+        self.file_progress_signal.emit("", None)
+        self.finished_signal.emit(grand_total_dl, grand_total_skip, self.is_cancelled)
+
+    def cancel(self):
+        self.is_cancelled = True
+        self.progress_signal.emit("   Cancellation signal received by Hentai2Read thread.")
 
 class ExternalLinkDownloadThread (QThread ):
     """A QThread to handle downloading multiple external links sequentially."""

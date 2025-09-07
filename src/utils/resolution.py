@@ -284,7 +284,7 @@ def setup_ui(main_app):
     advanced_row2_layout.addLayout(multithreading_layout)
     main_app.external_links_checkbox = QCheckBox("Show External Links in Log")
     advanced_row2_layout.addWidget(main_app.external_links_checkbox)
-    main_app.manga_mode_checkbox = QCheckBox("Manga/Comic Mode")
+    main_app.manga_mode_checkbox = QCheckBox("Renaming Mode")
     advanced_row2_layout.addWidget(main_app.manga_mode_checkbox)
     advanced_row2_layout.addStretch(1)
     checkboxes_group_layout.addLayout(advanced_row2_layout)
@@ -391,10 +391,23 @@ def setup_ui(main_app):
     main_app.link_search_button.setVisible(False)
     main_app.link_search_button.setFixedWidth(int(30 * scale))
     log_title_layout.addWidget(main_app.link_search_button)
+  
+    discord_controls_layout = QHBoxLayout()
+
     main_app.discord_scope_toggle_button = QPushButton("Scope: Files")
     main_app.discord_scope_toggle_button.setVisible(False) # Hidden by default
-    main_app.discord_scope_toggle_button.setFixedWidth(int(140 * scale))
-    log_title_layout.addWidget(main_app.discord_scope_toggle_button)
+    discord_controls_layout.addWidget(main_app.discord_scope_toggle_button)
+
+    main_app.discord_message_limit_input = QLineEdit(main_app)
+    main_app.discord_message_limit_input.setPlaceholderText("Msg Limit")
+    main_app.discord_message_limit_input.setToolTip("Optional: Limit the number of recent messages to process.")
+    main_app.discord_message_limit_input.setValidator(QIntValidator(1, 9999999, main_app))
+    main_app.discord_message_limit_input.setFixedWidth(int(80 * scale))
+    main_app.discord_message_limit_input.setVisible(False) # Hide it by default
+    discord_controls_layout.addWidget(main_app.discord_message_limit_input)
+    
+    log_title_layout.addLayout(discord_controls_layout)
+  
     main_app.manga_rename_toggle_button = QPushButton()
     main_app.manga_rename_toggle_button.setVisible(False)
     main_app.manga_rename_toggle_button.setFixedWidth(int(140 * scale))

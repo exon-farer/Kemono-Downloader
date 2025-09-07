@@ -1,6 +1,7 @@
 import os
 import re
 import datetime
+import time
 try:
     from fpdf import FPDF
     FPDF_AVAILABLE = True
@@ -29,7 +30,7 @@ except ImportError:
     FPDF = None 
     PDF = None
 
-def create_pdf_from_discord_messages(messages_data, server_name, channel_name, output_filename, font_path, logger=print):
+def create_pdf_from_discord_messages(messages_data, server_name, channel_name, output_filename, font_path, logger=print, cancellation_event=None, pause_event=None):
     """
     Creates a single PDF from a list of Discord message objects, formatted as a chat log.
     UPDATED to include clickable links for attachments and embeds.
@@ -42,8 +43,20 @@ def create_pdf_from_discord_messages(messages_data, server_name, channel_name, o
         logger("   No messages were found or fetched to create a PDF.")
         return False
 
+    # --- FIX: This helper function now correctly accepts and checks the event objects ---
+    def check_events(c_event, p_event):
+        """Helper to safely check for pause and cancel events."""
+        if c_event and hasattr(c_event, 'is_cancelled') and c_event.is_cancelled:
+            return True # Stop
+        if p_event and hasattr(p_event, 'is_paused'):
+            while p_event.is_paused:
+                time.sleep(0.5)
+                if c_event and hasattr(c_event, 'is_cancelled') and c_event.is_cancelled:
+                    return True
+        return False
+
     logger("   Sorting messages by date (oldest first)...")
-    messages_data.sort(key=lambda m: m.get('published', ''))
+    messages_data.sort(key=lambda m: m.get('published', m.get('timestamp', '')))
 
     pdf = PDF(server_name, channel_name)
     default_font_family = 'DejaVu'
@@ -78,14 +91,19 @@ def create_pdf_from_discord_messages(messages_data, server_name, channel_name, o
     logger(f"   Starting PDF creation with {len(messages_data)} messages...")
 
     for i, message in enumerate(messages_data):
+        # --- FIX: Pass the event objects to the helper function ---
+        if i % 50 == 0:
+            if check_events(cancellation_event, pause_event):
+                logger("   PDF generation cancelled by user.")
+                return False
+
         author = message.get('author', {}).get('global_name') or message.get('author', {}).get('username', 'Unknown User')
-        timestamp_str = message.get('published', '')
+        timestamp_str = message.get('published', message.get('timestamp', ''))
         content = message.get('content', '')
         attachments = message.get('attachments', [])
         embeds = message.get('embeds', [])
 
         try:
-            # Handle timezone information correctly
             if timestamp_str.endswith('Z'):
                 timestamp_str = timestamp_str[:-1] + '+00:00'
             dt_obj = datetime.datetime.fromisoformat(timestamp_str)
@@ -93,14 +111,12 @@ def create_pdf_from_discord_messages(messages_data, server_name, channel_name, o
         except (ValueError, TypeError):
             formatted_timestamp = timestamp_str
 
-        # Draw a separator line
         if i > 0:
             pdf.ln(2)
-            pdf.set_draw_color(200, 200, 200) # Light grey line
+            pdf.set_draw_color(200, 200, 200)
             pdf.cell(0, 0, '', border='T')
             pdf.ln(2)
 
-        # Message Header
         pdf.set_font(default_font_family, 'B', 11)
         pdf.write(5, f"{author} ")
         pdf.set_font(default_font_family, '', 9)
@@ -109,33 +125,31 @@ def create_pdf_from_discord_messages(messages_data, server_name, channel_name, o
         pdf.set_text_color(0, 0, 0)
         pdf.ln(6)
 
-        # Message Content
         if content:
             pdf.set_font(default_font_family, '', 10)
             pdf.multi_cell(w=0, h=5, text=content)
         
-        # --- START: MODIFIED ATTACHMENT AND EMBED LOGIC ---
         if attachments or embeds:
             pdf.ln(1)
             pdf.set_font(default_font_family, '', 9)
-            pdf.set_text_color(22, 119, 219) # A nice blue for links
+            pdf.set_text_color(22, 119, 219)
 
             for att in attachments:
-                file_name = att.get('name', 'untitled')
-                file_path = att.get('path', '')
-                # Construct the full, clickable URL for the attachment
-                full_url = f"https://kemono.cr/data{file_path}"
+                file_name = att.get('filename', 'untitled')
+                full_url = att.get('url', '#')
                 pdf.write(5, text=f"[Attachment: {file_name}]", link=full_url)
-                pdf.ln() # New line after each attachment
+                pdf.ln()
 
             for embed in embeds:
                 embed_url = embed.get('url', 'no url')
-                # The embed URL is already a full URL
                 pdf.write(5, text=f"[Embed: {embed_url}]", link=embed_url)
-                pdf.ln() # New line after each embed
+                pdf.ln()
 
-            pdf.set_text_color(0, 0, 0) # Reset color to black
-        # --- END: MODIFIED ATTACHMENT AND EMBED LOGIC ---
+            pdf.set_text_color(0, 0, 0)
+
+    if check_events(cancellation_event, pause_event):
+        logger("   PDF generation cancelled by user before final save.")
+        return False
 
     try:
         pdf.output(output_filename)

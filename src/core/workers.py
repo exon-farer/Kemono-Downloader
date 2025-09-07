@@ -848,6 +848,8 @@ class PostProcessorWorker:
                     'original_post_id_for_log': original_post_id_for_log, 'post_title': post_title,
                     'file_index_in_post': file_index_in_post, 'num_files_in_this_post': num_files_in_this_post,
                     'forced_filename_override': filename_to_save_in_main_path,
+                    'service': self.service,
+                    'user_id': self.user_id
                 }
                 return 0, 1, final_filename_saved_for_return, was_original_name_kept_flag, FILE_DOWNLOAD_STATUS_FAILED_PERMANENTLY_THIS_SESSION, permanent_failure_details
             finally:

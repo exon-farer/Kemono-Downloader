@@ -1,4 +1,3 @@
-# --- Application Metadata ---
 CONFIG_ORGANIZATION_NAME = "KemonoDownloader"
 CONFIG_APP_NAME_MAIN = "ApplicationSettings"
 CONFIG_APP_NAME_TOUR = "ApplicationTour"
@@ -9,7 +8,7 @@ STYLE_ORIGINAL_NAME = "original_name"
 STYLE_DATE_BASED = "date_based"
 STYLE_DATE_POST_TITLE = "date_post_title"
 STYLE_POST_TITLE_GLOBAL_NUMBERING = "post_title_global_numbering"
-STYLE_POST_ID = "post_id"  # Add this line
+STYLE_POST_ID = "post_id"
 MANGA_DATE_PREFIX_DEFAULT = ""
 
 # --- Download Scopes ---
@@ -60,7 +59,11 @@ DOWNLOAD_LOCATION_KEY = "downloadLocationV1"
 RESOLUTION_KEY = "window_resolution"
 UI_SCALE_KEY = "ui_scale_factor"
 SAVE_CREATOR_JSON_KEY = "saveCreatorJsonProfile"
-FETCH_FIRST_KEY = "fetchAllPostsFirst" 
+FETCH_FIRST_KEY = "fetchAllPostsFirst"
+# --- FIX: Add the missing key for the Discord token ---
+DISCORD_TOKEN_KEY = "discord/token"
+
+POST_DOWNLOAD_ACTION_KEY = "postDownloadAction"
 
 # --- UI Constants and Identifiers ---
 HTML_PREFIX = "<!HTML!>"
@@ -120,4 +123,4 @@ CREATOR_DOWNLOAD_DEFAULT_FOLDER_IGNORE_WORDS = {
 
 # --- Duplicate Handling Modes ---
 DUPLICATE_HANDLING_HASH = "hash"      
-DUPLICATE_HANDLING_KEEP_ALL = "keep_all"  
+DUPLICATE_HANDLING_KEEP_ALL = "keep_all"

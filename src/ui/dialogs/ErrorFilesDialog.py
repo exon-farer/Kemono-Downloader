@@ -106,7 +106,17 @@ class ErrorFilesDialog(QDialog):
             post_title = error_info.get('post_title', 'Unknown Post')
             post_id = error_info.get('original_post_id_for_log', 'N/A')
 
-            item_text = f"File: {filename}\nFrom Post: '{post_title}' (ID: {post_id})"
+            creator_name = "Unknown Creator"
+            service = error_info.get('service')
+            user_id = error_info.get('user_id')
+            
+            # Check if we have the necessary info and access to the cache
+            if service and user_id and hasattr(self.parent_app, 'creator_name_cache'):
+                creator_key = (service.lower(), str(user_id))
+                # Look up the name, fall back to the user_id if not found
+                creator_name = self.parent_app.creator_name_cache.get(creator_key, user_id)
+
+            item_text = f"File: {filename}\nCreator: {creator_name} - Post: '{post_title}' (ID: {post_id})"
             list_item = QListWidgetItem(item_text)
             list_item.setData(Qt.UserRole, error_info)
             list_item.setFlags(list_item.flags() | Qt.ItemIsUserCheckable)
