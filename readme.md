@@ -35,7 +35,6 @@
 <div align="center">
     <a href="features.md"><img src="https://img.shields.io/badge/📚%20Full%20Feature%20List-FFD700?style=for-the-badge&logoColor=black&color=FFD700" alt="Full Feature List"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/📝%20License-90EE90?style=for-the-badge&logoColor=black&color=90EE90" alt="License"></a>
-    <a href="note.md"><img src="https://img.shields.io/badge/⚠️%20Important%20Note-FFCCCB?style=for-the-badge&logoColor=black&color=FFCCCB" alt="Important Note"></a>
 </div>
 
 <h2>Core Capabilities Overview</h2>
