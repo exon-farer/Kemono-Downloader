@@ -6,9 +6,9 @@ We are committed to maintaining and improving the Kemono Downloader. For the bes
 
 | Version        | Supported Status                     |
 | -------------- | ------------------------------------ |
-| >= 5.0.0       | :white_check_mark: Actively Supported  |
-| 4.0.0 - 4.x.x  | :warning: Supported (Limited Features) |
-| < 4.0.0        | :x: End of Life (EOL)                |
+| >= 7.0.0       | :white_check_mark: Actively Supported  |
+| 6.0.0 - 6.x.x  | :warning: Supported (Limited Features) |
+| < 5.0.0        | :x: End of Life (EOL)                |
 
 Users are encouraged to update to **v5.0.0 or newer** versions.
 
