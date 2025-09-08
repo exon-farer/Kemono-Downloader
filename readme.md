@@ -19,7 +19,7 @@
           <strong>Single Post</strong>
         </td>
         <td align="center">
-          <img src="Read/Read3.png" alt="Manga/Comic Mode" width="400"><br>
+          <img src="Read/Read3.png" alt="Renaming Mode" width="400"><br>
           <strong>Manga/Comic Mode</strong>
         </td>
       </tr>
