@@ -20,7 +20,7 @@
         </td>
         <td align="center">
           <img src="Read/Read3.png" alt="Renaming Mode" width="400"><br>
-          <strong>Manga/Comic Mode</strong>
+          <strong>Renaming Mode</strong>
         </td>
       </tr>
     </tbody>
@@ -66,7 +66,7 @@
 </ul>
 <h3>Specialized Modes</h3>
 <ul>
-  <li><strong>Manga/Comic Mode:</strong> Sorts posts chronologically before downloading to ensure pages appear in the correct sequence.</li>
+  <li><strong>Renaming Mode:</strong> Sorts posts chronologically before downloading to ensure pages appear in the correct sequence.</li>
   <li><strong>Favorite Mode:</strong> Connects to your account and downloads from your favorites list (artists or posts).</li>
   <li><strong>Link Extraction Mode:</strong> Extracts external links (Mega, Google Drive) from posts for export or <strong>direct in-app downloading</strong>.</li>
   <li><strong>Text Extraction Mode:</strong> Saves post descriptions or comment sections as <code>PDF</code>, <code>DOCX</code>, or <code>TXT</code> files.</li>
