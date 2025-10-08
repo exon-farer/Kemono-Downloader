@@ -1,34 +1,5 @@
 <h1 align="center">Kemono Downloader</h1>
 
-<div align="center">
-  <table>
-    <tbody>
-      <tr>
-        <td align="center">
-          <img src="Read/Read.png" alt="Default Mode" width="400"><br>
-          <strong>Default Mode</strong>
-        </td>
-        <td align="center">
-          <img src="Read/Read1.png" alt="Favorite Mode" width="400"><br>
-          <strong>Favorite Mode</strong>
-        </td>
-      </tr>
-      <tr>
-        <td align="center">
-          <img src="Read/Read2.png" alt="Single Post" width="400"><br>
-          <strong>Single Post</strong>
-        </td>
-        <td align="center">
-          <img src="Read/Read3.png" alt="Renaming Mode" width="400"><br>
-          <strong>Renaming Mode</strong>
-        </td>
-      </tr>
-    </tbody>
-  </table>
-</div>
-
-<hr>
-
 <p>A powerful, feature-rich GUI application for downloading content from a wide array of sites, including <strong>Kemono</strong>, <strong>Coomer</strong>, <strong>Bunkr</strong>, <strong>Erome</strong>, <strong>Saint2.su</strong>, and <strong>nhentai</strong>.</p>
 <p>Built with PyQt5, this tool is designed for users who want deep filtering capabilities, customizable folder structures, efficient downloads, and intelligent automation — all within a modern and user-friendly graphical interface.</p>
 
@@ -79,6 +50,62 @@
   <li><strong>Creator Management:</strong> Built-in creator browser and update checker for downloading only new posts from saved profiles.</li>
   <li><strong>Error Handling:</strong> Tracks failed downloads and provides a retry dialog with options to export or redownload missing files.</li>
 </ul>
+<section aria-labelledby="supported-sites">
+  <h2 id="supported-sites">Supported Sites</h2>
+
+  <h3>Main Platforms</h3>
+  <p>
+    The downloader is primarily built to archive content from the platforms below.
+  </p>
+  <ul>
+    <li>
+      <strong>Kemono &amp; Coomer</strong> — Core supported sites; download posts and files from creators on services such as
+      <em>Patreon, Fanbox, OnlyFans, Fansly</em>, and similar platforms.
+    </li>
+    <li>
+      <strong>Discord</strong> — Two modes for a channel URL:
+      <ul>
+        <li>Download all files and attachments.</li>
+        <li>Save the entire message history as a formatted PDF.</li>
+      </ul>
+    </li>
+  </ul>
+
+  <hr>
+
+  <h3>Specialized Site Support</h3>
+  <p>Paste a link from any of the following and the app will handle the download automatically:</p>
+
+  <details>
+    <summary>Supported specialized sites (click to expand)</summary>
+    <ul>
+      <li>AllPornComic</li>
+      <li>Bunkr</li>
+      <li>Erome</li>
+      <li>Fap-Nation</li>
+      <li>Hentai2Read</li>
+      <li>nhentai</li>
+      <li>Pixeldrain</li>
+      <li>Saint2</li>
+      <li>Toonily</li>
+    </ul>
+  </details>
+
+  <hr>
+
+  <h3>Direct File Hosting</h3>
+  <p>
+    You may paste direct links from these file hosting services to download contents without using the
+    <code>&quot;Only Links&quot;</code> mode:
+  </p>
+  <ul>
+    <li>Dropbox</li>
+    <li>Gofile</li>
+    <li>Google Drive</li>
+    <li>Mega</li>
+  </ul>
+</section>
+
 <h2>💻 Installation</h2>
 <h3>Requirements</h3>
 <ul>
@@ -86,8 +113,12 @@
   <li>pip (Python package installer)</li>
 </ul>
 <h3>Install Dependencies</h3>
-<pre><code>pip install PyQt5 requests cloudscraper Pillow fpdf2 python-docx
+<pre><code>Required - pip install PyQt5 requests packaging cloudscraper bs4 pycryptodome
 </code></pre>
+
+<pre><code>Optional - pip install gdown pillow fpdf python-docx 
+</code></pre>
+
 <h3>Running the Application</h3>
 <p>Navigate to the application's directory in your terminal and run:</p>
 <pre><code>python main.py
@@ -96,6 +127,10 @@
 <p>Feel free to fork this repo and submit pull requests for bug fixes, new features, or UI improvements!</p>
 <h2>License</h2>
 <p>This project is under the MIT Licence</p>
+### Included Third-Party Tools
+
+This project includes a pre-compiled binary of `yt-dlp` for handling certain video downloads. `yt-dlp` is in the public domain. For more information or to get the latest version, please visit the official [yt-dlp GitHub repository](https://github.com/yt-dlp/yt-dlp).
+
 <h2>Star History</h2>
 <table align="center" style="border-collapse: collapse; border: none; margin-left: auto; margin-right: auto;">
   <tbody>
@@ -108,6 +143,7 @@
     </tr>
   </tbody>
 </table>
+
 <p align="center">
   <a href="https://buymeacoffee.com/yuvi9587">
     <img src="https://img.shields.io/badge/🍺%20Buy%20Me%20a%20Coffee-FFCCCB?style=for-the-badge&amp;logoColor=black&amp;color=FFDD00" alt="Buy Me a Coffee">
