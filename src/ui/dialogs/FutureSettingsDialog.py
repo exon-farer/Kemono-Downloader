@@ -7,7 +7,7 @@ import sys
 from PyQt5.QtCore import Qt, QStandardPaths, QTimer
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
-    QGroupBox, QComboBox, QMessageBox, QGridLayout, QCheckBox
+    QGroupBox, QComboBox, QMessageBox, QGridLayout, QCheckBox, QLineEdit
 )
 # --- Local Application Imports ---
 from ...i18n.translator import get_translation
@@ -18,6 +18,7 @@ from ..main_window import get_app_icon_object
 from ...config.constants import (
     THEME_KEY, LANGUAGE_KEY, DOWNLOAD_LOCATION_KEY,
     RESOLUTION_KEY, UI_SCALE_KEY, SAVE_CREATOR_JSON_KEY,
+    DATE_PREFIX_FORMAT_KEY, 
     COOKIE_TEXT_KEY, USE_COOKIE_KEY,
     FETCH_FIRST_KEY, DISCORD_TOKEN_KEY, POST_DOWNLOAD_ACTION_KEY
 )
@@ -175,19 +176,25 @@ class FutureSettingsDialog(QDialog):
         download_window_layout.addWidget(self.default_path_label, 1, 0)
         download_window_layout.addWidget(self.save_path_button, 1, 1)
 
+        self.date_prefix_format_label = QLabel()
+        self.date_prefix_format_input = QLineEdit()
+        self.date_prefix_format_input.textChanged.connect(self._date_prefix_format_changed)
+        download_window_layout.addWidget(self.date_prefix_format_label, 2, 0)
+        download_window_layout.addWidget(self.date_prefix_format_input, 2, 1)
+
         self.post_download_action_label = QLabel()
         self.post_download_action_combo = QComboBox()
         self.post_download_action_combo.currentIndexChanged.connect(self._post_download_action_changed)
-        download_window_layout.addWidget(self.post_download_action_label, 2, 0)
-        download_window_layout.addWidget(self.post_download_action_combo, 2, 1)
+        download_window_layout.addWidget(self.post_download_action_label, 3, 0)
+        download_window_layout.addWidget(self.post_download_action_combo, 3, 1)
 
         self.save_creator_json_checkbox = QCheckBox()
         self.save_creator_json_checkbox.stateChanged.connect(self._creator_json_setting_changed)
-        download_window_layout.addWidget(self.save_creator_json_checkbox, 3, 0, 1, 2)
+        download_window_layout.addWidget(self.save_creator_json_checkbox, 4, 0, 1, 2)
         
         self.fetch_first_checkbox = QCheckBox()
         self.fetch_first_checkbox.stateChanged.connect(self._fetch_first_setting_changed)
-        download_window_layout.addWidget(self.fetch_first_checkbox, 4, 0, 1, 2)
+        download_window_layout.addWidget(self.fetch_first_checkbox, 5, 0, 1, 2)
 
         main_layout.addWidget(self.download_window_group_box)
 
@@ -215,8 +222,26 @@ class FutureSettingsDialog(QDialog):
         self.theme_label.setText(self._tr("theme_label", "Theme:"))
         self.ui_scale_label.setText(self._tr("ui_scale_label", "UI Scale:"))
         self.language_label.setText(self._tr("language_label", "Language:"))
+
         self.window_size_label.setText(self._tr("window_size_label", "Window Size:"))
         self.default_path_label.setText(self._tr("default_path_label", "Default Path:"))
+
+        self.date_prefix_format_label.setText(self._tr("date_prefix_format_label", "Post Subfolder Format:"))
+        # Update placeholder to include {post}
+        self.date_prefix_format_input.setPlaceholderText(self._tr("date_prefix_format_placeholder", "e.g., YYYY-MM-DD {post} {postid}"))
+        # Add the tooltip to explain usage
+        self.date_prefix_format_input.setToolTip(self._tr(
+            "date_prefix_format_tooltip", 
+            "Create a custom folder name using placeholders:\n"
+            "• YYYY, MM, DD: for the date\n"
+            "• {post}: for the post title\n"
+            "• {postid}: for the post's unique ID\n\n"
+            "Example: {post} [{postid}] [YYYY-MM-DD]"
+        ))
+
+        
+        self.post_download_action_label.setText(self._tr("post_download_action_label", "Action After Download:"))
+
         self.post_download_action_label.setText(self._tr("post_download_action_label", "Action After Download:"))
         self.save_creator_json_checkbox.setText(self._tr("save_creator_json_label", "Save Creator.json file"))
         self.fetch_first_checkbox.setText(self._tr("fetch_first_label", "Fetch First (Download after all pages are found)"))
@@ -235,6 +260,7 @@ class FutureSettingsDialog(QDialog):
         self._populate_display_combo_boxes()
         self._populate_language_combo_box()
         self._populate_post_download_action_combo()
+        self._load_date_prefix_format()
         self._load_checkbox_states()
 
     def _check_for_updates(self):
@@ -411,6 +437,21 @@ class FutureSettingsDialog(QDialog):
         selected_action = self.post_download_action_combo.currentData()
         self.parent_app.settings.setValue(POST_DOWNLOAD_ACTION_KEY, selected_action)
         self.parent_app.settings.sync()
+
+    def _load_date_prefix_format(self):
+        """Loads the saved date prefix format and sets it in the input field."""
+        self.date_prefix_format_input.blockSignals(True)
+        current_format = self.parent_app.settings.value(DATE_PREFIX_FORMAT_KEY, "YYYY-MM-DD {post}", type=str)
+        self.date_prefix_format_input.setText(current_format)
+        self.date_prefix_format_input.blockSignals(False)
+
+    def _date_prefix_format_changed(self, text):
+        """Saves the date prefix format whenever it's changed."""
+        self.parent_app.settings.setValue(DATE_PREFIX_FORMAT_KEY, text)
+        self.parent_app.settings.sync()
+        # Also update the live value in the parent app
+        if hasattr(self.parent_app, 'date_prefix_format'):
+            self.parent_app.date_prefix_format = text
 
     def _save_settings(self):
         path_saved = False

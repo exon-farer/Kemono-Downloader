@@ -2,49 +2,34 @@
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
-    QMessageBox, QPushButton, QVBoxLayout, QAbstractItemView, QFileDialog
+    QMessageBox, QPushButton, QVBoxLayout, QAbstractItemView, QFileDialog, QCheckBox
 )
 
 # --- Local Application Imports ---
 from ...i18n.translator import get_translation
 from ..assets import get_app_icon_object
-# Corrected Import: The filename uses PascalCase.
 from .ExportOptionsDialog import ExportOptionsDialog
 from ...utils.resolution import get_dark_theme
+from ...config.constants import AUTO_RETRY_ON_FINISH_KEY
 
 class ErrorFilesDialog(QDialog):
     """
     Dialog to display files that were skipped due to errors and
     allows the user to retry downloading them or export the list of URLs.
     """
-
-    # Signal emitted with a list of file info dictionaries to retry
     retry_selected_signal = pyqtSignal(list)
 
     def __init__(self, error_files_info_list, parent_app, parent=None):
-        """
-        Initializes the dialog.
-
-        Args:
-            error_files_info_list (list): A list of dictionaries, each containing
-                                          info about a failed file.
-            parent_app (DownloaderApp): A reference to the main application window
-                                      for theming and translations.
-            parent (QWidget, optional): The parent widget. Defaults to None.
-        """
         super().__init__(parent)
         self.parent_app = parent_app
         self.setModal(True)
         self.error_files = error_files_info_list
-
-        # --- Basic Window Setup ---
         app_icon = get_app_icon_object()
         if app_icon and not app_icon.isNull():
             self.setWindowIcon(app_icon)
 
         scale_factor = getattr(self.parent_app, 'scale_factor', 1.0)
-
-        base_width, base_height = 550, 400
+        base_width, base_height = 600, 450
         self.setMinimumSize(int(base_width * scale_factor), int(base_height * scale_factor))
         self.resize(int(base_width * scale_factor * 1.1), int(base_height * scale_factor * 1.1))
 
@@ -53,21 +38,19 @@ class ErrorFilesDialog(QDialog):
         self._apply_theme()
 
     def _init_ui(self):
-        """Initializes all UI components and layouts for the dialog."""
         main_layout = QVBoxLayout(self)
-
         self.info_label = QLabel()
         self.info_label.setWordWrap(True)
         main_layout.addWidget(self.info_label)
 
-        if self.error_files:
-            self.files_list_widget = QListWidget()
-            self.files_list_widget.setSelectionMode(QAbstractItemView.NoSelection)
-            self._populate_list()
-            main_layout.addWidget(self.files_list_widget)
+        self.files_list_widget = QListWidget()
+        self.files_list_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        main_layout.addWidget(self.files_list_widget)
+        self._populate_list()
 
         # --- Control Buttons ---
         buttons_layout = QHBoxLayout()
+
         self.select_all_button = QPushButton()
         self.select_all_button.clicked.connect(self._select_all_items)
         buttons_layout.addWidget(self.select_all_button)
@@ -76,104 +59,170 @@ class ErrorFilesDialog(QDialog):
         self.retry_button.clicked.connect(self._handle_retry_selected)
         buttons_layout.addWidget(self.retry_button)
 
+        self.load_button = QPushButton()
+        self.load_button.clicked.connect(self._handle_load_errors_from_txt)
+        buttons_layout.addWidget(self.load_button)
+
         self.export_button = QPushButton()
         self.export_button.clicked.connect(self._handle_export_errors_to_txt)
         buttons_layout.addWidget(self.export_button)
+        
+        # The stretch will push everything added after this point to the right
         buttons_layout.addStretch(1)
 
+        # --- MOVED: Auto Retry Checkbox ---
+        self.auto_retry_checkbox = QCheckBox()
+        auto_retry_enabled = self.parent_app.settings.value(AUTO_RETRY_ON_FINISH_KEY, False, type=bool)
+        self.auto_retry_checkbox.setChecked(auto_retry_enabled)
+        self.auto_retry_checkbox.toggled.connect(self._save_auto_retry_setting)
+        buttons_layout.addWidget(self.auto_retry_checkbox)
+        # --- END ---
+        
         self.ok_button = QPushButton()
         self.ok_button.clicked.connect(self.accept)
         self.ok_button.setDefault(True)
         buttons_layout.addWidget(self.ok_button)
         main_layout.addLayout(buttons_layout)
 
-        # Enable/disable buttons based on whether there are errors
         has_errors = bool(self.error_files)
         self.select_all_button.setEnabled(has_errors)
         self.retry_button.setEnabled(has_errors)
         self.export_button.setEnabled(has_errors)
 
     def _populate_list(self):
-        """Populates the list widget with details of the failed files."""
+        self.files_list_widget.clear()
         for error_info in self.error_files:
-            filename = error_info.get('forced_filename_override',
-                                      error_info.get('file_info', {}).get('name', 'Unknown Filename'))
-            post_title = error_info.get('post_title', 'Unknown Post')
-            post_id = error_info.get('original_post_id_for_log', 'N/A')
+            self._add_item_to_list(error_info)
 
-            creator_name = "Unknown Creator"
-            service = error_info.get('service')
-            user_id = error_info.get('user_id')
+    def _handle_load_errors_from_txt(self):
+        """Opens a file dialog to load URLs from a .txt file."""
+        import re
+        
+        filepath, _ = QFileDialog.getOpenFileName(
+            self,
+            self._tr("error_files_load_dialog_title", "Load Error File URLs"),
+            "",
+            "Text Files (*.txt);;All Files (*)"
+        )
+
+        if not filepath:
+            return
+
+        try:
+            detailed_pattern = re.compile(r"^(https?://[^\s]+)\s*\[Post: '(.*?)' \(ID: (.*?)\), File: '(.*?)'\]$")
+            simple_pattern = re.compile(r'^(https?://[^\s]+)')
+
+            with open(filepath, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line: continue
+                    
+                    url, post_title, post_id, filename = None, 'Loaded from .txt', 'N/A', None
+                    
+                    detailed_match = detailed_pattern.match(line)
+                    if detailed_match:
+                        url, post_title, post_id, filename = detailed_match.groups()
+                    else:
+                        simple_match = simple_pattern.match(line)
+                        if simple_match:
+                            url = simple_match.group(1)
+                            filename = url.split('/')[-1]
+
+                    if url:
+                        simple_error_info = {
+                            'is_loaded_from_txt': True, 'file_info': {'url': url, 'name': filename},
+                            'post_title': post_title, 'original_post_id_for_log': post_id,
+                            'target_folder_path': self.parent_app.dir_input.text().strip(),
+                            'forced_filename_override': filename, 'file_index_in_post': 0,
+                            'num_files_in_this_post': 1, 'service': None, 'user_id': None, 'api_url_input': ''
+                        }
+                        self.error_files.append(simple_error_info)
+                        self._add_item_to_list(simple_error_info)
             
-            # Check if we have the necessary info and access to the cache
-            if service and user_id and hasattr(self.parent_app, 'creator_name_cache'):
-                creator_key = (service.lower(), str(user_id))
-                # Look up the name, fall back to the user_id if not found
-                creator_name = self.parent_app.creator_name_cache.get(creator_key, user_id)
-
-            item_text = f"File: {filename}\nCreator: {creator_name} - Post: '{post_title}' (ID: {post_id})"
-            list_item = QListWidgetItem(item_text)
-            list_item.setData(Qt.UserRole, error_info)
-            list_item.setFlags(list_item.flags() | Qt.ItemIsUserCheckable)
-            list_item.setCheckState(Qt.Unchecked)
-            self.files_list_widget.addItem(list_item)
+            self.info_label.setText(self._tr("error_files_found_label", "The following {count} file(s)...").format(count=len(self.error_files)))
+            
+            has_errors = bool(self.error_files)
+            self.select_all_button.setEnabled(has_errors)
+            self.retry_button.setEnabled(has_errors)
+            self.export_button.setEnabled(has_errors)
+            
+        except Exception as e:
+            QMessageBox.critical(self, self._tr("error_files_load_error_title", "Load Error"),
+                                 self._tr("error_files_load_error_message", "Could not load or parse the file: {error}").format(error=str(e)))
 
     def _tr(self, key, default_text=""):
-        """Helper to get translation based on the main application's current language."""
         if callable(get_translation) and self.parent_app:
             return get_translation(self.parent_app.current_selected_language, key, default_text)
         return default_text
 
     def _retranslate_ui(self):
-        """Sets the text for all translatable UI elements."""
         self.setWindowTitle(self._tr("error_files_dialog_title", "Files Skipped Due to Errors"))
         if not self.error_files:
             self.info_label.setText(self._tr("error_files_no_errors_label", "No files were recorded as skipped..."))
         else:
             self.info_label.setText(self._tr("error_files_found_label", "The following {count} file(s)...").format(count=len(self.error_files)))
 
-        self.select_all_button.setText(self._tr("error_files_select_all_button", "Select All"))
+        self.auto_retry_checkbox.setText(self._tr("error_files_auto_retry_checkbox", "Auto Retry at End"))
+        self.select_all_button.setText(self._tr("error_files_select_all_button", "Select/Deselect All"))
         self.retry_button.setText(self._tr("error_files_retry_selected_button", "Retry Selected"))
+        self.load_button.setText(self._tr("error_files_load_urls_button", "Load URLs from .txt"))       
         self.export_button.setText(self._tr("error_files_export_urls_button", "Export URLs to .txt"))
         self.ok_button.setText(self._tr("ok_button", "OK"))
 
     def _apply_theme(self):
-        """Applies the current theme from the parent application."""
         if self.parent_app and self.parent_app.current_theme == "dark":
-            # Get the scale factor from the parent app
             scale = getattr(self.parent_app, 'scale_factor', 1)
-            # Call the imported function with the correct scale
             self.setStyleSheet(get_dark_theme(scale))
         else:
-            # Explicitly set a blank stylesheet for light mode
             self.setStyleSheet("")
 
+    def _save_auto_retry_setting(self, checked):
+        """Saves the state of the auto-retry checkbox to QSettings."""
+        self.parent_app.settings.setValue(AUTO_RETRY_ON_FINISH_KEY, checked)
+
+    def _add_item_to_list(self, error_info):
+        """Creates and adds a single QListWidgetItem based on error_info content."""
+        if error_info.get('is_loaded_from_txt'):
+            filename = error_info.get('file_info', {}).get('name', 'Unknown Filename')
+            post_title = error_info.get('post_title', 'N/A')
+            post_id = error_info.get('original_post_id_for_log', 'N/A')
+            item_text = f"File: {filename}\nPost: '{post_title}' (ID: {post_id}) [Loaded from .txt]"
+        else:
+            filename = error_info.get('forced_filename_override', error_info.get('file_info', {}).get('name', 'Unknown Filename'))
+            post_title = error_info.get('post_title', 'Unknown Post')
+            post_id = error_info.get('original_post_id_for_log', 'N/A')
+            creator_name = "Unknown Creator"
+            service, user_id = error_info.get('service'), error_info.get('user_id')
+            if service and user_id and hasattr(self.parent_app, 'creator_name_cache'):
+                creator_name = self.parent_app.creator_name_cache.get((service.lower(), str(user_id)), user_id)
+            item_text = f"File: {filename}\nCreator: {creator_name} - Post: '{post_title}' (ID: {post_id})"
+
+        list_item = QListWidgetItem(item_text)
+        list_item.setData(Qt.UserRole, error_info)
+        list_item.setFlags(list_item.flags() | Qt.ItemIsUserCheckable)
+        list_item.setCheckState(Qt.Unchecked) # Start as unchecked
+        self.files_list_widget.addItem(list_item)
+
     def _select_all_items(self):
-        """Checks all items in the list."""
-        if hasattr(self, 'files_list_widget'):
-            for i in range(self.files_list_widget.count()):
-                self.files_list_widget.item(i).setCheckState(Qt.Checked)
+        """Toggles checking all items in the list."""
+        # Determine if we should check or uncheck all based on the first item's state
+        is_currently_checked = self.files_list_widget.item(0).checkState() == Qt.Checked if self.files_list_widget.count() > 0 else False
+        new_state = Qt.Unchecked if is_currently_checked else Qt.Checked
+        for i in range(self.files_list_widget.count()):
+            self.files_list_widget.item(i).setCheckState(new_state)
 
     def _handle_retry_selected(self):
-        """Gathers selected files and emits the retry signal."""
-        if not hasattr(self, 'files_list_widget'):
-            return
-
         selected_files_for_retry = [
             self.files_list_widget.item(i).data(Qt.UserRole)
             for i in range(self.files_list_widget.count())
             if self.files_list_widget.item(i).checkState() == Qt.Checked
         ]
-
         if selected_files_for_retry:
             self.retry_selected_signal.emit(selected_files_for_retry)
             self.accept()
         else:
-            QMessageBox.information(
-                self,
-                self._tr("fav_artists_no_selection_title", "No Selection"),
-                self._tr("error_files_no_selection_retry_message", "Please select at least one file to retry.")
-            )
+            QMessageBox.information(self, self._tr("fav_artists_no_selection_title", "No Selection"),
+                                    self._tr("error_files_no_selection_retry_message", "Please check the box next to at least one file to retry."))
 
     def _handle_export_errors_to_txt(self):
         """Exports the URLs of failed files to a text file."""
@@ -198,10 +247,13 @@ class ErrorFilesDialog(QDialog):
 
             if url:
                 if export_option == ExportOptionsDialog.EXPORT_MODE_WITH_DETAILS:
-                    original_filename = file_info.get('name', 'Unknown Filename')
                     post_title = error_item.get('post_title', 'Unknown Post')
                     post_id = error_item.get('original_post_id_for_log', 'N/A')
-                    details_string = f" [Post: '{post_title}' (ID: {post_id}), File: '{original_filename}']"
+                    
+                    # Prioritize the final renamed filename, but fall back to the original from the API
+                    filename_to_display = error_item.get('forced_filename_override') or file_info.get('name', 'Unknown Filename')
+                    
+                    details_string = f" [Post: '{post_title}' (ID: {post_id}), File: '{filename_to_display}']"
                     lines_to_export.append(f"{url}{details_string}")
                 else:
                     lines_to_export.append(url)

@@ -47,6 +47,8 @@ MAX_PARTS_FOR_MULTIPART_DOWNLOAD = 15
 # --- UI and Settings Keys (for QSettings) ---
 TOUR_SHOWN_KEY = "neverShowTourAgainV19"
 MANGA_FILENAME_STYLE_KEY = "mangaFilenameStyleV1"
+MANGA_CUSTOM_FORMAT_KEY = "mangaCustomFormatV1" 
+MANGA_CUSTOM_DATE_FORMAT_KEY = "mangaCustomDateFormatV1" 
 SKIP_WORDS_SCOPE_KEY = "skipWordsScopeV1"
 ALLOW_MULTIPART_DOWNLOAD_KEY = "allowMultipartDownloadV1"
 USE_COOKIE_KEY = "useCookieV1"
@@ -59,6 +61,8 @@ DOWNLOAD_LOCATION_KEY = "downloadLocationV1"
 RESOLUTION_KEY = "window_resolution"
 UI_SCALE_KEY = "ui_scale_factor"
 SAVE_CREATOR_JSON_KEY = "saveCreatorJsonProfile"
+DATE_PREFIX_FORMAT_KEY = "datePrefixFormatV1" 
+AUTO_RETRY_ON_FINISH_KEY = "auto_retry_on_finish" 
 FETCH_FIRST_KEY = "fetchAllPostsFirst"
 DISCORD_TOKEN_KEY = "discord/token"
 
@@ -84,7 +88,7 @@ VIDEO_EXTENSIONS = {
     '.mpg', '.m4v', '.3gp', '.ogv', '.ts', '.vob'
 }
 ARCHIVE_EXTENSIONS = {
-    '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2'
+    '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.bin'
 }
 AUDIO_EXTENSIONS = {
     '.mp3', '.wav', '.aac', '.flac', '.ogg', '.wma', '.m4a', '.opus',
@@ -123,3 +127,4 @@ CREATOR_DOWNLOAD_DEFAULT_FOLDER_IGNORE_WORDS = {
 # --- Duplicate Handling Modes ---
 DUPLICATE_HANDLING_HASH = "hash"      
 DUPLICATE_HANDLING_KEEP_ALL = "keep_all"
+STYLE_CUSTOM = "custom"

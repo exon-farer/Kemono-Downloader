@@ -66,12 +66,8 @@ def create_single_pdf_from_content(posts_data, output_filename, font_path, logge
 
     for i, post in enumerate(posts_data):
         if i > 0:
-            if 'content' in post:
-                pdf.add_page()
-            elif 'comments' in post:
-                pdf.ln(10)
-                pdf.cell(0, 0, '', border='T')
-                pdf.ln(10)
+            # This ensures every post after the first gets its own page.
+            pdf.add_page()
 
         pdf.set_font(default_font_family, 'B', 16)
         pdf.multi_cell(w=0, h=10, txt=post.get('title', 'Untitled Post'), align='L')

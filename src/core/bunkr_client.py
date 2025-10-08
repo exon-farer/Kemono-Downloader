@@ -207,7 +207,7 @@ def get_bunkr_extractor(url, logger):
 def fetch_bunkr_data(url, logger):
     """
     Main function to be called from the GUI.
-    It extracts all file information from a Bunkr URL.
+    It extracts all file information from a Bunkr URL, now handling both albums and direct file links.
     
     Returns:
         A tuple of (album_name, list_of_files)
@@ -215,6 +215,30 @@ def fetch_bunkr_data(url, logger):
         - list_of_files (list): A list of dicts, each containing 'url', 'name', and '_http_headers'.
         Returns (None, None) on failure.
     """
+    # --- START: New logic to handle direct CDN file URLs ---
+    try:
+        parsed_url = urllib.parse.urlparse(url)
+        # Check if the hostname contains 'cdn' and the path has a common file extension
+        is_direct_cdn_file = (parsed_url.hostname and 'cdn' in parsed_url.hostname and 'bunkr' in parsed_url.hostname and
+                              any(parsed_url.path.lower().endswith(ext) for ext in ['.mp4', '.mkv', '.webm', '.jpg', '.jpeg', '.png', '.gif', '.zip', '.rar']))
+
+        if is_direct_cdn_file:
+            logger.info("Bunkr direct file URL detected.")
+            filename = os.path.basename(parsed_url.path)
+            # Use the filename (without extension) as a sensible album name
+            album_name = os.path.splitext(filename)[0]
+            
+            files_to_download = [{
+                'url': url,
+                'name': filename,
+                '_http_headers': {'Referer': 'https://bunkr.ru/'} # Use a generic Referer
+            }]
+            return album_name, files_to_download
+    except Exception as e:
+        logger.warning(f"Could not parse Bunkr URL for direct file check: {e}")
+    # --- END: New logic ---
+
+    # This is the original logic for album and media pages
     extractor = get_bunkr_extractor(url, logger)
     if not extractor:
         return None, None

@@ -33,7 +33,7 @@ def fetch_posts_paginated(api_url_base, headers, offset, logger, cancellation_ev
         if cancellation_event and cancellation_event.is_set():
             raise RuntimeError("Fetch operation cancelled by user during retry loop.")
 
-        log_message = f"   Fetching post list: {paginated_url} (Page approx. {offset // 50 + 1})"
+        log_message = f"   Fetching post list: {api_url_base} (Page approx. {offset // 50 + 1})"
         if attempt > 0:
             log_message += f" (Attempt {attempt + 1}/{max_retries})"
         logger(log_message)
@@ -247,7 +247,7 @@ def download_from_api(
                     break
                 all_posts_for_manga_mode.extend(posts_batch_manga)
                 
-                logger(f"MANGA_FETCH_PROGRESS:{len(all_posts_for_manga_mode)}:{current_page_num_manga}")
+                logger(f"RENAMING_MODE_FETCH_PROGRESS:{len(all_posts_for_manga_mode)}:{current_page_num_manga}")
 
                 current_offset_manga += page_size
                 time.sleep(0.6)
@@ -265,7 +265,7 @@ def download_from_api(
         if cancellation_event and cancellation_event.is_set(): return
         
         if all_posts_for_manga_mode:
-            logger(f"MANGA_FETCH_COMPLETE:{len(all_posts_for_manga_mode)}")
+            logger(f"RENAMING_MODE_FETCH_COMPLETE:{len(all_posts_for_manga_mode)}")
 
         if all_posts_for_manga_mode:
             if processed_post_ids:

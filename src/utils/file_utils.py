@@ -20,7 +20,7 @@ VIDEO_EXTENSIONS = {
     '.mpg', '.m4v', '.3gp', '.ogv', '.ts', '.vob'
 }
 ARCHIVE_EXTENSIONS = {
-    '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2'
+    '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.bin'
 }
 AUDIO_EXTENSIONS = {
     '.mp3', '.wav', '.aac', '.flac', '.ogg', '.wma', '.m4a', '.opus',
@@ -140,3 +140,5 @@ def is_audio(filename):
     if not filename: return False
     _, ext = os.path.splitext(filename)
     return ext.lower() in AUDIO_EXTENSIONS
+
+    

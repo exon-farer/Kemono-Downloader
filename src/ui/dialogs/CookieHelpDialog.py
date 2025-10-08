@@ -16,7 +16,6 @@ class CookieHelpDialog(QDialog):
     It can be displayed as a simple informational popup or as a modal choice
     when cookies are required but not found.
     """
-    # Constants to define the user's choice from the dialog
     CHOICE_PROCEED_WITHOUT_COOKIES = 1
     CHOICE_CANCEL_DOWNLOAD = 2
     CHOICE_OK_INFO_ONLY = 3
@@ -64,7 +63,6 @@ class CookieHelpDialog(QDialog):
         button_layout.addStretch(1)
 
         if self.offer_download_without_option:
-            # Add buttons for making a choice
             self.download_without_button = QPushButton()
             self.download_without_button.clicked.connect(self._proceed_without_cookies)
             button_layout.addWidget(self.download_without_button)
@@ -73,7 +71,6 @@ class CookieHelpDialog(QDialog):
             self.cancel_button.clicked.connect(self._cancel_download)
             button_layout.addWidget(self.cancel_button)
         else:
-            # Add a simple OK button for informational display
             self.ok_button = QPushButton()
             self.ok_button.clicked.connect(self._ok_info_only)
             button_layout.addWidget(self.ok_button)

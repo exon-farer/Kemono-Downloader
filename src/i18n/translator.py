@@ -2869,7 +2869,7 @@ translations ["en"]={
     "cookie_help_instruction_intro": "<p>To use cookies, you typically need a <b>cookies.txt</b> file from your browser.</p>",
     "cookie_help_how_to_get_title": "<p><b>How to get cookies.txt:</b></p>",
     "cookie_help_step1_extension_intro": "<li>Install the 'Get cookies.txt LOCALLY' extension for your Chrome-based browser:<br><a href=\"https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc\" style=\"color: #87CEEB;\">Get cookies.txt LOCALLY on Chrome Web Store</a></li>",
-    "cookie_help_step2_login": "<li>Go to the website (e.g., kemono.su or coomer.su) and log in if necessary.</li>",
+    "cookie_help_step2_login": "<li>Go to the website (e.g., kemono.su, coomer.su or Simpcity.cr) and log in if necessary.</li>",
     "cookie_help_step3_click_icon": "<li>Click the extension icon in your browser's toolbar.</li>",
     "cookie_help_step4_export": "<li>Click an 'Export' button (e.g., \"Export As\", \"Export cookies.txt\" - exact wording may vary by extension version).</li>",
     "cookie_help_step5_save_file": "<li>Save the downloaded <code>cookies.txt</code> file to your computer.</li>",

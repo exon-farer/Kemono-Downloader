@@ -1,71 +1,144 @@
-# src/ui/dialogs/SupportDialog.py
+# src/app/dialogs/SupportDialog.py
 
-# --- Standard Library Imports ---
 import sys
 import os
 
-# --- PyQt5 Imports ---
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QFrame, QDialogButtonBox, QGridLayout
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QPushButton, QSizePolicy
 )
-from PyQt5.QtCore import Qt, QSize
-from PyQt5.QtGui import QFont, QPixmap
+from PyQt5.QtCore import Qt, QSize, QUrl
+from PyQt5.QtGui import QPixmap, QDesktopServices
 
-# --- Local Application Imports ---
 from ...utils.resolution import get_dark_theme
-
-# --- Helper function for robust asset loading ---
-def get_asset_path(filename):
-    """
-    Gets the absolute path to a file in the assets folder,
-    handling both development and frozen (PyInstaller) environments.
-    """
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        # Running in a PyInstaller bundle
-        base_path = sys._MEIPASS
-    else:
-        # Running in a normal Python environment from src/ui/dialogs/
-        base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    
-    return os.path.join(base_path, 'assets', filename)
 
 
 class SupportDialog(QDialog):
     """
-    A dialog to show support and donation options.
+    A polished dialog showcasing support and community options in a
+    clean, modern card-based layout.
     """
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_app = parent
-        self.setWindowTitle("❤️ Support the Developer")
-        self.setMinimumWidth(450)
+
+        self.setWindowTitle("❤️ Support & Community")
+        self.setMinimumWidth(560)
 
         self._init_ui()
         self._apply_theme()
 
-    def _init_ui(self):
-        """Initializes all UI components and layouts for the dialog."""
-        # Main layout
-        main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(15)
+    def _create_card_button(
+        self, icon_path, title, subtitle, url,
+        hover_color="#2E2E2E", min_height=110, icon_size=44
+    ):
+        """Reusable clickable card widget with icon, title, and subtitle."""
+        button = QPushButton()
+        button.setCursor(Qt.PointingHandCursor)
+        button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        button.setMinimumHeight(min_height)
 
-        # Title Label
-        title_label = QLabel("Thank You for Your Support!")
-        font = title_label.font()
-        font.setPointSize(14)
+        # Consistent style
+        button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #3A3A3A;
+                border: 1px solid #555;
+                border-radius: 10px;
+                text-align: center;
+                padding: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_color};
+                border: 1px solid #777;
+            }}
+        """)
+
+        layout = QVBoxLayout(button)
+        layout.setSpacing(6)
+
+        # Icon
+        icon_label = QLabel()
+        pixmap = QPixmap(icon_path)
+        if not pixmap.isNull():
+            scale = getattr(self.parent_app, 'scale_factor', 1.0)
+            scaled_size = int(icon_size * scale)
+            icon_label.setPixmap(
+                pixmap.scaled(QSize(scaled_size, scaled_size), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            )
+        icon_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(icon_label)
+
+        # Title
+        title_label = QLabel(title)
+        font = self.font()
+        font.setPointSize(11)
         font.setBold(True)
         title_label.setFont(font)
         title_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(title_label)
+        title_label.setStyleSheet("background-color: transparent; border: none;")
+        layout.addWidget(title_label)
 
-        # Informational Text
-        info_label = QLabel(
-            "If you find this application useful, please consider supporting its development. "
-            "Your contribution helps cover costs and encourages future updates and features."
+        # Subtitle
+        if subtitle:
+            subtitle_label = QLabel(subtitle)
+            subtitle_label.setStyleSheet("color: #A8A8A8; background-color: transparent; border: none;")
+            subtitle_label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(subtitle_label)
+
+        button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(url)))
+        return button
+
+    def _create_section_title(self, text):
+        """Stylized section heading."""
+        label = QLabel(text)
+        font = label.font()
+        font.setPointSize(13)
+        font.setBold(True)
+        label.setFont(font)
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet("margin-top: 10px; margin-bottom: 5px;")
+        return label
+
+    def _init_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(18)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+
+        # Header
+        header_label = QLabel("Support the Project")
+        font = header_label.font()
+        font.setPointSize(17)
+        font.setBold(True)
+        header_label.setFont(font)
+        header_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(header_label)
+
+        subtext = QLabel(
+            "If you enjoy this application, consider supporting its development. "
+            "Your help keeps the project alive and growing!"
         )
-        info_label.setWordWrap(True)
-        info_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(info_label)
+        subtext.setWordWrap(True)
+        subtext.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(subtext)
+
+        # Financial Support
+        main_layout.addWidget(self._create_section_title("Contribute Financially"))
+        donation_layout = QHBoxLayout()
+        donation_layout.setSpacing(15)
+
+        donation_layout.addWidget(self._create_card_button(
+            get_asset_path("ko-fi.png"), "Ko-fi", "One-time ",
+            "https://ko-fi.com/yuvi427183", "#2B2F36"
+        ))
+        donation_layout.addWidget(self._create_card_button(
+            get_asset_path("patreon.png"), "Patreon", "Soon ",
+            "https://www.patreon.com/Yuvi102", "#3A2E2B"
+        ))
+        donation_layout.addWidget(self._create_card_button(
+            get_asset_path("buymeacoffee.png"), "Buy Me a Coffee", "One-time",
+            "https://buymeacoffee.com/yuvi9587", "#403520"
+        ))
+        main_layout.addLayout(donation_layout)
 
         # Separator
         line = QFrame()
@@ -73,83 +146,62 @@ class SupportDialog(QDialog):
         line.setFrameShadow(QFrame.Sunken)
         main_layout.addWidget(line)
 
-        # --- Donation Options Layout (using a grid for icons and text) ---
-        options_layout = QGridLayout()
-        options_layout.setSpacing(18)
-        options_layout.setColumnStretch(0, 1) # Add stretch to center the content horizontally
-        options_layout.setColumnStretch(3, 1)
+        # Community Section
+        main_layout.addWidget(self._create_section_title("Get Help & Connect"))
+        community_layout = QHBoxLayout()
+        community_layout.setSpacing(15)
 
-        link_font = self.font()
-        link_font.setPointSize(12)
-        link_font.setBold(True)
-        
-        scale = getattr(self.parent_app, 'scale_factor', 1.0)
-        icon_size = int(32 * scale)
-
-        # --- Ko-fi ---
-        kofi_icon_label = QLabel()
-        kofi_pixmap = QPixmap(get_asset_path("kofi.png"))
-        if not kofi_pixmap.isNull():
-            kofi_icon_label.setPixmap(kofi_pixmap.scaled(QSize(icon_size, icon_size), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        
-        kofi_text_label = QLabel(
-            '<a href="https://ko-fi.com/yuvi427183" style="color: #13C2C2; text-decoration: none;">'
-            '☕ Buy me a Ko-fi'
-            '</a>'
-        )
-        kofi_text_label.setOpenExternalLinks(True)
-        kofi_text_label.setFont(link_font)
-        
-        options_layout.addWidget(kofi_icon_label, 0, 1, Qt.AlignRight | Qt.AlignVCenter)
-        options_layout.addWidget(kofi_text_label, 0, 2, Qt.AlignLeft | Qt.AlignVCenter)
-
-        # --- GitHub Sponsors ---
-        github_icon_label = QLabel()
-        github_pixmap = QPixmap(get_asset_path("github_sponsors.png"))
-        if not github_pixmap.isNull():
-            github_icon_label.setPixmap(github_pixmap.scaled(QSize(icon_size, icon_size), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-
-        github_text_label = QLabel(
-            '<a href="https://github.com/sponsors/Yuvi9587" style="color: #EA4AAA; text-decoration: none;">'
-            '💜 Sponsor on GitHub'
-            '</a>'
-        )
-        github_text_label.setOpenExternalLinks(True)
-        github_text_label.setFont(link_font)
-
-        options_layout.addWidget(github_icon_label, 1, 1, Qt.AlignRight | Qt.AlignVCenter)
-        options_layout.addWidget(github_text_label, 1, 2, Qt.AlignLeft | Qt.AlignVCenter)
-
-        # --- Buy Me a Coffee (New) ---
-        bmac_icon_label = QLabel()
-        bmac_pixmap = QPixmap(get_asset_path("bmac.png"))
-        if not bmac_pixmap.isNull():
-            bmac_icon_label.setPixmap(bmac_pixmap.scaled(QSize(icon_size, icon_size), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            
-        bmac_text_label = QLabel(
-            '<a href="https://buymeacoffee.com/yuvi9587" style="color: #FFDD00; text-decoration: none;">'
-            '🍺 Buy Me a Coffee'
-            '</a>'
-        )
-        bmac_text_label.setOpenExternalLinks(True)
-        bmac_text_label.setFont(link_font)
-        
-        options_layout.addWidget(bmac_icon_label, 2, 1, Qt.AlignRight | Qt.AlignVCenter)
-        options_layout.addWidget(bmac_text_label, 2, 2, Qt.AlignLeft | Qt.AlignVCenter)
-
-        main_layout.addLayout(options_layout)
+        community_layout.addWidget(self._create_card_button(
+            get_asset_path("github.png"), "GitHub", "Report issues",
+            "https://github.com/Yuvi63771/Kemono-Downloader", "#2E2E2E",
+            min_height=100, icon_size=36
+        ))
+        community_layout.addWidget(self._create_card_button(
+            get_asset_path("discord.png"), "Discord", "Join the server",
+            "https://discord.gg/BqP64XTdJN", "#2C2F33",
+            min_height=100, icon_size=36
+        ))
+        community_layout.addWidget(self._create_card_button(
+            get_asset_path("instagram.png"), "Instagram", "Follow me",
+            "https://www.instagram.com/uvi.arts/", "#3B2E40",
+            min_height=100, icon_size=36
+        ))
+        main_layout.addLayout(community_layout)
 
         # Close Button
-        self.button_box = QDialogButtonBox(QDialogButtonBox.Close)
-        self.button_box.rejected.connect(self.reject)
-        main_layout.addWidget(self.button_box)
+        close_button = QPushButton("Close")
+        close_button.setMinimumWidth(100)
+        close_button.clicked.connect(self.accept)
+        close_button.setStyleSheet("""
+            QPushButton {
+                padding: 6px 14px;
+                border-radius: 6px;
+                background-color: #444;
+                color: white;
+            }
+            QPushButton:hover {
+                background-color: #555;
+            }
+        """)
 
-        self.setLayout(main_layout)
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(close_button)
+        button_layout.addStretch()
+        main_layout.addLayout(button_layout)
 
     def _apply_theme(self):
-        """Applies the current theme from the parent application."""
         if self.parent_app and hasattr(self.parent_app, 'current_theme') and self.parent_app.current_theme == "dark":
             scale = getattr(self.parent_app, 'scale_factor', 1)
             self.setStyleSheet(get_dark_theme(scale))
         else:
             self.setStyleSheet("")
+
+
+def get_asset_path(filename):
+    """Return the path to an asset, works in both dev and packaged environments."""
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    return os.path.join(base_path, 'assets', filename)

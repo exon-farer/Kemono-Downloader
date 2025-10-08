@@ -28,19 +28,12 @@ def setup_ui(main_app):
     main_app.scale_factor = scale
 
     default_font = QApplication.font()
-    base_font_size = 9 # Use a standard base size
+    base_font_size = 9
     default_font.setPointSize(int(base_font_size * scale))
     main_app.setFont(default_font)
-
-    default_font = QApplication.font()
-    base_font_size = 9 # Use a standard base size
-    default_font.setPointSize(int(base_font_size * scale))
-    main_app.setFont(default_font)
-    # --- END: Improved Scaling Logic ---
 
     main_app.main_splitter = QSplitter(Qt.Horizontal)
     
-    # --- Use a scroll area for the left panel for consistency ---
     left_scroll_area = QScrollArea()
     left_scroll_area.setWidgetResizable(True)
     left_scroll_area.setFrameShape(QFrame.NoFrame)
@@ -75,7 +68,7 @@ def setup_ui(main_app):
     main_app.empty_popup_button.clicked.connect(main_app._show_empty_popup)
     url_input_layout.addWidget(main_app.empty_popup_button)
     main_app.page_range_label = QLabel(main_app._tr("page_range_label_text", "Page Range:"))
-    main_app.page_range_label.setStyleSheet("font-weight: bold; padding-left: 10px;")
+    main_app.page_range_label .setStyleSheet("font-weight: bold; padding-left: 10px;")
     url_input_layout.addWidget(main_app.page_range_label)
     main_app.start_page_input = QLineEdit()
     main_app.start_page_input.setPlaceholderText(main_app._tr("start_page_input_placeholder", "Start"))
@@ -134,8 +127,6 @@ def setup_ui(main_app):
     main_app._update_char_filter_scope_button_text()
     char_input_and_button_layout.addWidget(main_app.char_filter_scope_toggle_button, 1)
     character_filter_v_layout.addLayout(char_input_and_button_layout)
-    
-    # --- Custom Folder Widget Definition ---
     main_app.custom_folder_widget = QWidget()
     custom_folder_v_layout = QVBoxLayout(main_app.custom_folder_widget)
     custom_folder_v_layout.setContentsMargins(0, 0, 0, 0)
@@ -146,7 +137,6 @@ def setup_ui(main_app):
     custom_folder_v_layout.addWidget(main_app.custom_folder_label)
     custom_folder_v_layout.addWidget(main_app.custom_folder_input)
     main_app.custom_folder_widget.setVisible(False)
-    
     filters_and_custom_folder_layout.addWidget(main_app.character_filter_widget, 1)
     filters_and_custom_folder_layout.addWidget(main_app.custom_folder_widget, 1)
     left_layout.addWidget(main_app.filters_and_custom_folder_container_widget)
@@ -199,7 +189,6 @@ def setup_ui(main_app):
     main_app.radio_only_audio = QRadioButton("🎧 Only Audio")
     main_app.radio_only_links = QRadioButton("🔗 Only Links")
     main_app.radio_more = QRadioButton("More") 
-
     main_app.radio_all.setChecked(True)
     for btn in [main_app.radio_all, main_app.radio_images, main_app.radio_videos, main_app.radio_only_archives, main_app.radio_only_audio, main_app.radio_only_links, main_app.radio_more]:
         main_app.radio_group.addButton(btn)
@@ -210,6 +199,24 @@ def setup_ui(main_app):
     radio_button_layout.addStretch(1)
     file_filter_layout.addLayout(radio_button_layout)
     left_layout.addLayout(file_filter_layout)
+
+    # --- Booru Inputs Container ---
+    main_app.booru_inputs_widget = QWidget()
+    booru_inputs_layout = QHBoxLayout(main_app.booru_inputs_widget)
+    booru_inputs_layout.setContentsMargins(0, 5, 0, 0)
+    main_app.api_key_label = QLabel("API Key:")
+    main_app.api_key_input = QLineEdit()
+    main_app.api_key_input.setPlaceholderText("Danbooru or Gelbooru API Key")
+    main_app.user_id_label = QLabel("User ID:")
+    main_app.user_id_input = QLineEdit()
+    main_app.user_id_input.setPlaceholderText("Danbooru Username or Gelbooru User ID")
+    booru_inputs_layout.addWidget(main_app.api_key_label)
+    booru_inputs_layout.addWidget(main_app.api_key_input, 1)
+    booru_inputs_layout.addSpacing(10)
+    booru_inputs_layout.addWidget(main_app.user_id_label)
+    booru_inputs_layout.addWidget(main_app.user_id_input, 1)
+    left_layout.addWidget(main_app.booru_inputs_widget)
+    main_app.booru_inputs_widget.setVisible(False)
 
     # --- Checkboxes Group ---
     checkboxes_group_layout = QVBoxLayout()
@@ -234,40 +241,42 @@ def setup_ui(main_app):
     row1_layout.addStretch(1)
     checkboxes_group_layout.addLayout(row1_layout)
 
-    # --- Advanced Settings ---
+    # --- Advanced Settings Container ---
+    main_app.advanced_settings_widget = QWidget()
+    advanced_settings_layout = QVBoxLayout(main_app.advanced_settings_widget)
+    advanced_settings_layout.setContentsMargins(0, 0, 0, 0)
+    advanced_settings_layout.setSpacing(10)
     advanced_settings_label = QLabel("⚙️ Advanced Settings:")
-    checkboxes_group_layout.addWidget(advanced_settings_label)
-    advanced_row1_layout = QHBoxLayout()
-    advanced_row1_layout.setSpacing(10)
+    advanced_settings_layout.addWidget(advanced_settings_label)
 
-    # --- REORDERED CHECKBOXES ---
+    main_app.advanced_row1_layout = QHBoxLayout()
+    main_app.advanced_row1_layout.setSpacing(10)
     main_app.use_subfolder_per_post_checkbox = QCheckBox("Subfolder per Post")
     main_app.use_subfolder_per_post_checkbox.toggled.connect(main_app.update_ui_for_subfolders)
     main_app.use_subfolder_per_post_checkbox.setChecked(True)    
-    advanced_row1_layout.addWidget(main_app.use_subfolder_per_post_checkbox)
-
+    main_app.advanced_row1_layout.addWidget(main_app.use_subfolder_per_post_checkbox)
     main_app.date_prefix_checkbox = QCheckBox("Date Prefix")
     main_app.date_prefix_checkbox.setToolTip("When 'Subfolder per Post' is active, prefix the folder name with the post's upload date.")
-    advanced_row1_layout.addWidget(main_app.date_prefix_checkbox)
-    
+    main_app.advanced_row1_layout.addWidget(main_app.date_prefix_checkbox)
     main_app.use_subfolders_checkbox = QCheckBox("Separate Folders by Known.txt")
     main_app.use_subfolders_checkbox.setChecked(False)
     main_app.use_subfolders_checkbox.toggled.connect(main_app.update_ui_for_subfolders)
-    advanced_row1_layout.addWidget(main_app.use_subfolders_checkbox)
-    # --- END REORDER ---
-
+    main_app.advanced_row1_layout.addWidget(main_app.use_subfolders_checkbox)
+    
+    # --- Original Cookie Controls (for non-SimpCity sites) ---
     main_app.use_cookie_checkbox = QCheckBox("Use Cookie")
     main_app.use_cookie_checkbox.setChecked(main_app.use_cookie_setting)
     main_app.cookie_text_input = QLineEdit()
-    main_app.cookie_text_input.setPlaceholderText("if no Select cookies.txt)")
+    main_app.cookie_text_input.setPlaceholderText("Cookie string or path from Browse...")
     main_app.cookie_text_input.setText(main_app.cookie_text_setting)
-    advanced_row1_layout.addWidget(main_app.use_cookie_checkbox)
-    advanced_row1_layout.addWidget(main_app.cookie_text_input, 2)
     main_app.cookie_browse_button = QPushButton("Browse...")
     main_app.cookie_browse_button.setFixedWidth(int(80 * scale))
-    advanced_row1_layout.addWidget(main_app.cookie_browse_button)
-    advanced_row1_layout.addStretch(1)
-    checkboxes_group_layout.addLayout(advanced_row1_layout)
+    main_app.advanced_row1_layout.addWidget(main_app.use_cookie_checkbox)
+    main_app.advanced_row1_layout.addWidget(main_app.cookie_text_input, 2)
+    main_app.advanced_row1_layout.addWidget(main_app.cookie_browse_button)
+    main_app.advanced_row1_layout.addStretch(1)
+    advanced_settings_layout.addLayout(main_app.advanced_row1_layout)
+
     advanced_row2_layout = QHBoxLayout()
     advanced_row2_layout.setSpacing(10)
     multithreading_layout = QHBoxLayout()
@@ -287,10 +296,55 @@ def setup_ui(main_app):
     main_app.manga_mode_checkbox = QCheckBox("Renaming Mode")
     advanced_row2_layout.addWidget(main_app.manga_mode_checkbox)
     advanced_row2_layout.addStretch(1)
-    checkboxes_group_layout.addLayout(advanced_row2_layout)
+    advanced_settings_layout.addLayout(advanced_row2_layout)
+    checkboxes_group_layout.addWidget(main_app.advanced_settings_widget)
+
+    # --- SimpCity Settings Container (with its own cookie controls) ---
+    main_app.simpcity_settings_widget = QWidget()
+    simpcity_settings_layout = QVBoxLayout(main_app.simpcity_settings_widget)
+    simpcity_settings_layout.setContentsMargins(0, 0, 0, 0)
+    simpcity_settings_layout.setSpacing(10)
+    simpcity_settings_label = QLabel("⚙️ SimpCity Download Options:")
+    simpcity_settings_layout.addWidget(simpcity_settings_label)
+    
+    # Checkbox row
+    simpcity_checkboxes_layout = QHBoxLayout()
+    main_app.simpcity_dl_pixeldrain_cb = QCheckBox("Download Pixeldrain")
+    main_app.simpcity_dl_saint2_cb = QCheckBox("Download Saint2.su")
+    main_app.simpcity_dl_mega_cb = QCheckBox("Download Mega")
+    main_app.simpcity_dl_bunkr_cb = QCheckBox("Download Bunkr")
+    main_app.simpcity_dl_gofile_cb = QCheckBox("Download Gofile")
+    
+    simpcity_checkboxes_layout.addWidget(main_app.simpcity_dl_pixeldrain_cb)
+    simpcity_checkboxes_layout.addWidget(main_app.simpcity_dl_saint2_cb)
+    simpcity_checkboxes_layout.addWidget(main_app.simpcity_dl_mega_cb)
+    simpcity_checkboxes_layout.addWidget(main_app.simpcity_dl_bunkr_cb)
+    simpcity_checkboxes_layout.addWidget(main_app.simpcity_dl_gofile_cb)
+    simpcity_checkboxes_layout.addStretch(1)
+    simpcity_settings_layout.addLayout(simpcity_checkboxes_layout)
+    
+    # --- START NEW CODE ---
+    # Create the second, dedicated set of cookie controls for SimpCity
+    simpcity_cookie_layout = QHBoxLayout()
+    simpcity_cookie_layout.setContentsMargins(0, 5, 0, 0) # Add some top margin
+    simpcity_cookie_label = QLabel("Cookie:")
+    main_app.simpcity_cookie_text_input = QLineEdit()
+    main_app.simpcity_cookie_text_input.setPlaceholderText("Cookie string or path... (Required)")
+    main_app.simpcity_cookie_browse_button = QPushButton("Browse...")
+    main_app.simpcity_cookie_browse_button.setFixedWidth(int(80 * scale))
+    
+    simpcity_cookie_layout.addWidget(simpcity_cookie_label)
+    simpcity_cookie_layout.addWidget(main_app.simpcity_cookie_text_input, 1) # Stretch factor
+    simpcity_cookie_layout.addWidget(main_app.simpcity_cookie_browse_button)
+    
+    simpcity_settings_layout.addLayout(simpcity_cookie_layout)
+    checkboxes_group_layout.addWidget(main_app.simpcity_settings_widget)
+    main_app.simpcity_settings_widget.setVisible(False)
+    
     left_layout.addLayout(checkboxes_group_layout)
 
-    # --- Action Buttons ---
+    # --- Action Buttons & Remaining UI ---
+    # ... (The rest of the setup_ui function remains unchanged)
     main_app.standard_action_buttons_widget = QWidget()
     btn_layout = QHBoxLayout(main_app.standard_action_buttons_widget)
     btn_layout.setContentsMargins(0, 10, 0, 0)
@@ -326,8 +380,6 @@ def setup_ui(main_app):
     main_app.bottom_action_buttons_stack.addWidget(main_app.favorite_action_buttons_widget)
     left_layout.addWidget(main_app.bottom_action_buttons_stack)
     left_layout.addSpacing(10)
-
-    # --- Known Names Layout ---
     known_chars_label_layout = QHBoxLayout()
     known_chars_label_layout.setSpacing(10)
     main_app.known_chars_label = QLabel("🎭 Known Shows/Characters (for Folder Names):")
@@ -376,8 +428,6 @@ def setup_ui(main_app):
     char_manage_layout.addWidget(main_app.support_button, 0)
     left_layout.addLayout(char_manage_layout)
     left_layout.addStretch(0)
-
-    # --- Right Panel (Logs) ---
     right_panel_widget.setLayout(right_layout)
     log_title_layout = QHBoxLayout()
     main_app.progress_log_label = QLabel("📜 Progress Log:")
@@ -387,32 +437,31 @@ def setup_ui(main_app):
     main_app.link_search_input.setPlaceholderText("Search Links...")
     main_app.link_search_input.setVisible(False)
     log_title_layout.addWidget(main_app.link_search_input)
-    main_app.link_search_button = QPushButton("�")
+    main_app.link_search_button = QPushButton("🔎")
     main_app.link_search_button.setVisible(False)
     main_app.link_search_button.setFixedWidth(int(30 * scale))
     log_title_layout.addWidget(main_app.link_search_button)
-  
     discord_controls_layout = QHBoxLayout()
-
     main_app.discord_scope_toggle_button = QPushButton("Scope: Files")
-    main_app.discord_scope_toggle_button.setVisible(False) # Hidden by default
+    main_app.discord_scope_toggle_button.setVisible(False)
     discord_controls_layout.addWidget(main_app.discord_scope_toggle_button)
-
     main_app.discord_message_limit_input = QLineEdit(main_app)
     main_app.discord_message_limit_input.setPlaceholderText("Msg Limit")
     main_app.discord_message_limit_input.setToolTip("Optional: Limit the number of recent messages to process.")
     main_app.discord_message_limit_input.setValidator(QIntValidator(1, 9999999, main_app))
     main_app.discord_message_limit_input.setFixedWidth(int(80 * scale))
-    main_app.discord_message_limit_input.setVisible(False) # Hide it by default
+    main_app.discord_message_limit_input.setVisible(False)
     discord_controls_layout.addWidget(main_app.discord_message_limit_input)
-    
     log_title_layout.addLayout(discord_controls_layout)
-  
     main_app.manga_rename_toggle_button = QPushButton()
     main_app.manga_rename_toggle_button.setVisible(False)
     main_app.manga_rename_toggle_button.setFixedWidth(int(140 * scale))
     main_app._update_manga_filename_style_button_text()
     log_title_layout.addWidget(main_app.manga_rename_toggle_button)
+    main_app.custom_rename_dialog_button = QPushButton("Open Dialog")
+    main_app.custom_rename_dialog_button.setVisible(False)
+    main_app.custom_rename_dialog_button.clicked.connect(main_app._show_custom_rename_dialog)
+    log_title_layout.addWidget(main_app.custom_rename_dialog_button)
     main_app.manga_date_prefix_input = QLineEdit()
     main_app.manga_date_prefix_input.setPlaceholderText("Prefix for Manga Filenames")
     main_app.manga_date_prefix_input.setVisible(False)
@@ -475,26 +524,17 @@ def setup_ui(main_app):
     main_app.file_progress_label.setWordWrap(True)
     main_app.file_progress_label.setStyleSheet("padding-top: 2px; font-style: italic; color: #A0A0A0;")
     right_layout.addWidget(main_app.file_progress_label)
-
-    # --- Final Assembly ---
     main_app.main_splitter.addWidget(left_scroll_area)
     main_app.main_splitter.addWidget(right_panel_widget)
-    
     if main_app.width() >= 1920:
-        # For wider resolutions, give more space to the log panel (right).
         main_app.main_splitter.setStretchFactor(0, 4)
         main_app.main_splitter.setStretchFactor(1, 6)
     else:
-        # Default for lower resolutions, giving more space to controls (left).
         main_app.main_splitter.setStretchFactor(0, 7)
         main_app.main_splitter.setStretchFactor(1, 3)
-
-
     top_level_layout = QHBoxLayout(main_app)
     top_level_layout.setContentsMargins(0, 0, 0, 0)
     top_level_layout.addWidget(main_app.main_splitter)
-
-    # --- Initial UI State Updates ---
     main_app.update_ui_for_subfolders(main_app.use_subfolders_checkbox.isChecked())
     main_app.update_external_links_setting(main_app.external_links_checkbox.isChecked())
     main_app.update_multithreading_label(main_app.thread_count_input.text())
@@ -510,7 +550,6 @@ def setup_ui(main_app):
     if hasattr(main_app, 'radio_group') and main_app.radio_group.checkedButton():
         main_app._handle_filter_mode_change(main_app.radio_group.checkedButton(), True)
         main_app.radio_group.buttonToggled.connect(main_app._handle_more_options_toggled)
-        
     main_app._update_manga_filename_style_button_text()
     main_app._update_skip_scope_button_text()
     main_app._update_char_filter_scope_button_text()
@@ -551,6 +590,9 @@ def get_dark_theme(scale=1):
         color: #F0F0F0; 
         border-radius: 4px; 
         font-size: {font_size}pt; 
+    }}
+    QLineEdit::placeholder {{
+        color: #8A8A8A; /* A muted grey color for placeholder text */
     }}
     QTextEdit {{
         font-family: Consolas, Courier New, monospace;

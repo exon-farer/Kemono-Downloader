@@ -6,7 +6,7 @@ from packaging.version import parse as parse_version
 from PyQt5.QtCore import QThread, pyqtSignal
 
 # Constants for the updater
-GITHUB_REPO_URL = "https://api.github.com/repos/Yuvi9587/Kemono-Downloader/releases/latest"
+GITHUB_REPO_URL = "https://api.github.com/repos/Yuvi63771/Kemono-Downloader/releases/latest"
 EXE_NAME = "Kemono.Downloader.exe"
 
 class UpdateChecker(QThread):
@@ -65,22 +65,17 @@ class UpdateDownloader(QThread):
             old_path = os.path.join(app_dir, f"{EXE_NAME}.old")
             updater_script_path = os.path.join(app_dir, "updater.bat")
             
-            # --- NEW: Path for the PID file ---
             pid_file_path = os.path.join(app_dir, "updater.pid")
 
-            # Download the new executable
             with requests.get(self.download_url, stream=True, timeout=300) as r:
                 r.raise_for_status()
                 with open(temp_path, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
 
-            # --- NEW: Write the current Process ID to the pid file ---
             with open(pid_file_path, "w") as f:
                 f.write(str(os.getpid()))
 
-            # --- NEW BATCH SCRIPT ---
-            # This script now reads the PID from the "updater.pid" file.
             script_content = f"""
 @echo off
 SETLOCAL
