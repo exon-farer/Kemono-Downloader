@@ -1,0 +1,51 @@
+import threading
+import time
+from PyQt5.QtCore import QThread, pyqtSignal
+
+from ...core.Hentai2read_client import run_hentai2read_download as h2r_run_download
+
+
+class Hentai2readDownloadThread(QThread):
+    """
+    A dedicated QThread that calls the self-contained Hentai2Read client to
+    perform scraping and downloading.
+    """
+    progress_signal = pyqtSignal(str)
+    file_progress_signal = pyqtSignal(str, object)
+    finished_signal = pyqtSignal(int, int, bool)
+    overall_progress_signal = pyqtSignal(int, int)
+
+    def __init__(self, url, output_dir, parent=None):
+        super().__init__(parent)
+        self.start_url = url
+        self.output_dir = output_dir
+        self.is_cancelled = False
+        self.pause_event = parent.pause_event if hasattr(parent, 'pause_event') else threading.Event()
+
+    def _check_pause(self):
+        """Helper to handle pausing and cancellation events."""
+        if self.is_cancelled: return True
+        if self.pause_event and self.pause_event.is_set():
+            self.progress_signal.emit("   Download paused...")
+            while self.pause_event.is_set():
+                if self.is_cancelled: return True
+                time.sleep(0.5)
+            self.progress_signal.emit("   Download resumed.")
+        return self.is_cancelled
+
+    def run(self):
+        """
+        Executes the main download logic by calling the dedicated client function.
+        """
+        downloaded, skipped = h2r_run_download(
+            start_url=self.start_url,
+            output_dir=self.output_dir,
+            progress_callback=self.progress_signal.emit,
+            overall_progress_callback=self.overall_progress_signal.emit,
+            check_pause_func=self._check_pause
+        )
+        
+        self.finished_signal.emit(downloaded, skipped, self.is_cancelled)
+
+    def cancel(self):
+        self.is_cancelled = True

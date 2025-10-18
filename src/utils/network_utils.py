@@ -137,6 +137,12 @@ def extract_post_info(url_string):
 
     stripped_url = url_string.strip()
 
+    # --- Rule34Video Check ---
+    rule34video_match = re.search(r'rule34video\.com/video/(\d+)', stripped_url)
+    if rule34video_match:
+        video_id = rule34video_match.group(1)
+        return 'rule34video', video_id, None
+
     # --- Danbooru Check ---
     danbooru_match = re.search(r'danbooru\.donmai\.us|safebooru\.donmai\.us', stripped_url)
     if danbooru_match:

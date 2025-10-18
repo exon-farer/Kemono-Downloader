@@ -1,0 +1,87 @@
+import os
+import time
+import requests
+from PyQt5.QtCore import QThread, pyqtSignal
+import cloudscraper
+
+from ...core.rule34video_client import fetch_rule34video_data
+from ...utils.file_utils import clean_folder_name
+
+class Rule34VideoDownloadThread(QThread):
+    """A dedicated QThread for handling rule34video.com downloads."""
+    progress_signal = pyqtSignal(str)
+    file_progress_signal = pyqtSignal(str, object)
+    finished_signal = pyqtSignal(int, int, bool) # dl_count, skip_count, cancelled
+
+    def __init__(self, url, output_dir, parent=None):
+        super().__init__(parent)
+        self.video_url = url
+        self.output_dir = output_dir
+        self.is_cancelled = False
+
+    def run(self):
+        download_count = 0
+        skip_count = 0
+
+        video_title, final_video_url = fetch_rule34video_data(self.video_url, self.progress_signal.emit)
+
+        if not final_video_url:
+            self.progress_signal.emit("❌ Failed to get video data. Aborting.")
+            self.finished_signal.emit(0, 1, self.is_cancelled)
+            return
+
+        # Create a safe filename from the title, defaulting if needed
+        safe_title = clean_folder_name(video_title if video_title else "rule34video_file")
+        filename = f"{safe_title}.mp4"
+        filepath = os.path.join(self.output_dir, filename)
+
+        if os.path.exists(filepath):
+            self.progress_signal.emit(f"   -> Skip: '{filename}' already exists.")
+            self.finished_signal.emit(0, 1, self.is_cancelled)
+            return
+
+        self.progress_signal.emit(f"   Downloading: '{filename}'...")
+        try:
+            scraper = cloudscraper.create_scraper()
+            # The CDN link might not require special headers, but a referer is good practice
+            headers = {'Referer': 'https://rule34video.com/'}
+            response = scraper.get(final_video_url, stream=True, headers=headers, timeout=90)
+            response.raise_for_status()
+
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded_size = 0
+            last_update_time = time.time()
+
+            with open(filepath, 'wb') as f:
+                # Use a larger chunk size for video files
+                for chunk in response.iter_content(chunk_size=8192 * 4):
+                    if self.is_cancelled:
+                        break
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        current_time = time.time()
+                        if total_size > 0 and (current_time - last_update_time) > 0.5:
+                            self.file_progress_signal.emit(filename, (downloaded_size, total_size))
+                            last_update_time = current_time
+            
+            if self.is_cancelled:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                skip_count = 1
+                self.progress_signal.emit(f"   Download cancelled for '{filename}'.")
+            else:
+                download_count = 1
+        
+        except Exception as e:
+            self.progress_signal.emit(f"   ❌ Failed to download '{filename}': {e}")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            skip_count = 1
+        
+        self.file_progress_signal.emit("", None)
+        self.finished_signal.emit(download_count, skip_count, self.is_cancelled)
+
+    def cancel(self):
+        self.is_cancelled = True
+        self.progress_signal.emit("   Cancellation signal received by Rule34Video thread.")

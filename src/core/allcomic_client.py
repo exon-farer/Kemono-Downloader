@@ -1,36 +1,36 @@
 import requests
 import re
 from bs4 import BeautifulSoup
-import cloudscraper
 import time 
+import random
 from urllib.parse import urlparse
 
-def get_chapter_list(series_url, logger_func):
+def get_chapter_list(scraper, series_url, logger_func):
     """
     Checks if a URL is a series page and returns a list of all chapter URLs if it is.
-    Includes a retry mechanism for robust connection.
+    Relies on a passed-in scraper session for connection.
     """
     logger_func(f"   [AllComic] Checking for chapter list at: {series_url}")
     
-    scraper = cloudscraper.create_scraper()
+    headers = {'Referer': 'https://allporncomic.com/'}
     response = None
     max_retries = 8
 
     for attempt in range(max_retries):
         try:
-            response = scraper.get(series_url, timeout=30)
+            response = scraper.get(series_url, headers=headers, timeout=30)
             response.raise_for_status()
             logger_func(f"   [AllComic] Successfully connected to series page on attempt {attempt + 1}.")
-            break # Success, exit the loop
+            break 
         except requests.RequestException as e:
             logger_func(f"   [AllComic] ⚠️ Series page check attempt {attempt + 1}/{max_retries} failed: {e}")
             if attempt < max_retries - 1:
-                wait_time = 2 * (attempt + 1)
-                logger_func(f"      Retrying in {wait_time} seconds...")
+                wait_time = (2 ** attempt) + random.uniform(0, 2)
+                logger_func(f"      Retrying in {wait_time:.1f} seconds...")
                 time.sleep(wait_time)
             else:
                 logger_func(f"   [AllComic] ❌ All attempts to check series page failed.")
-                return [] # Return empty on final failure
+                return [] 
     
     if not response:
         return []
@@ -44,7 +44,7 @@ def get_chapter_list(series_url, logger_func):
             return []
 
         chapter_urls = [link['href'] for link in chapter_links]
-        chapter_urls.reverse() # Reverse for oldest-to-newest reading order
+        chapter_urls.reverse() 
         
         logger_func(f"   [AllComic] ✅ Found {len(chapter_urls)} chapters.")
         return chapter_urls
@@ -53,15 +53,13 @@ def get_chapter_list(series_url, logger_func):
         logger_func(f"   [AllComic] ❌ Error parsing chapters after successful connection: {e}")
         return []
 
-def fetch_chapter_data(chapter_url, logger_func):
+def fetch_chapter_data(scraper, chapter_url, logger_func):
     """
     Fetches the comic title, chapter title, and image URLs for a single chapter page.
+    Relies on a passed-in scraper session for connection.
     """
     logger_func(f"   [AllComic] Fetching page: {chapter_url}")
 
-    scraper = cloudscraper.create_scraper(
-        browser={'browser': 'firefox', 'platform': 'windows', 'desktop': True}
-    )
     headers = {'Referer': 'https://allporncomic.com/'}
     
     response = None
@@ -72,16 +70,23 @@ def fetch_chapter_data(chapter_url, logger_func):
             response.raise_for_status()
             break
         except requests.RequestException as e:
+            logger_func(f"   [AllComic] ⚠️ Chapter page connection attempt {attempt + 1}/{max_retries} failed: {e}")
             if attempt < max_retries - 1:
-                time.sleep(2 * (attempt + 1))
+                wait_time = (2 ** attempt) + random.uniform(0, 2)
+                logger_func(f"      Retrying in {wait_time:.1f} seconds...")
+                time.sleep(wait_time)
             else:
                 logger_func(f"   [AllComic] ❌ All connection attempts failed for chapter: {chapter_url}")
                 return None, None, None
     
+    if not response:
+        return None, None, None
+
     try:
         soup = BeautifulSoup(response.text, 'html.parser')
+        
+        comic_title = "Unknown Comic"
         title_element = soup.find('h1', class_='post-title')
-        comic_title = None
         if title_element:
             comic_title = title_element.text.strip()
         else:
@@ -91,7 +96,7 @@ def fetch_chapter_data(chapter_url, logger_func):
                     comic_slug = path_parts[-2]
                     comic_title = comic_slug.replace('-', ' ').title()
             except Exception:
-                comic_title = "Unknown Comic"
+                pass 
 
         chapter_slug = chapter_url.strip('/').split('/')[-1]
         chapter_title = chapter_slug.replace('-', ' ').title()
@@ -105,8 +110,8 @@ def fetch_chapter_data(chapter_url, logger_func):
                 if img_url:
                     list_of_image_urls.append(img_url)
 
-        if not comic_title or comic_title == "Unknown Comic" or not list_of_image_urls:
-            logger_func(f"   [AllComic] ❌ Could not find a valid title or images on the page. Title found: '{comic_title}'")
+        if not list_of_image_urls:
+            logger_func(f"   [AllComic] ❌ Could not find any images on the page.")
             return None, None, None
 
         return comic_title, chapter_title, list_of_image_urls

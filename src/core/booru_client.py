@@ -1,4 +1,3 @@
-# src/core/booru_client.py
 
 import os
 import re

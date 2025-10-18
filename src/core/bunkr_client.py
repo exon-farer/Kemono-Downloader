@@ -164,17 +164,34 @@ class BunkrAlbumExtractor(Extractor):
     def _extract_file(self, webpage_url):
         page = self.request(webpage_url).text
         data_id = extr(page, 'data-file-id="', '"')
-        referer = self.root_dl + "/file/" + data_id
-        headers = {"Referer": referer, "Origin": self.root_dl}
+        
+        # This referer is for the API call only
+        api_referer = self.root_dl + "/file/" + data_id
+        headers = {"Referer": api_referer, "Origin": self.root_dl}
         data = self.request_json(self.endpoint, method="POST", headers=headers, json={"id": data_id})
         
+        # Get the raw file URL (no domain replacement)
         file_url = decrypt_xor(data["url"], f"SECRET_KEY_{data['timestamp'] // 3600}".encode()) if data.get("encrypted") else data["url"]
+        
         file_name = extr(page, "<h1", "<").rpartition(">")[2]
+
+        # --- NEW FIX ---
+        # The download thread uses a new `requests` call, so we must
+        # explicitly pass BOTH the User-Agent and the correct Referer.
+        
+        # 1. Get the User-Agent from this extractor's session
+        user_agent = self.session.headers.get("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:102.0) Gecko/20100101 Firefox/102.0")
+        
+        # 2. Use the original album URL as the Referer
+        download_referer = self.url 
 
         return {
             "url": file_url, 
             "name": unescape(file_name), 
-            "_http_headers": {"Referer": referer}
+            "_http_headers": {
+                "Referer": download_referer,
+                "User-Agent": user_agent
+            }
         }
 
 class BunkrMediaExtractor(BunkrAlbumExtractor):

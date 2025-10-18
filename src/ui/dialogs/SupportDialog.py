@@ -153,7 +153,7 @@ class SupportDialog(QDialog):
 
         community_layout.addWidget(self._create_card_button(
             get_asset_path("github.png"), "GitHub", "Report issues",
-            "https://github.com/Yuvi63771/Kemono-Downloader", "#2E2E2E",
+            "https://github.com/Yuvi9587/Kemono-Downloader", "#2E2E2E",
             min_height=100, icon_size=36
         ))
         community_layout.addWidget(self._create_card_button(

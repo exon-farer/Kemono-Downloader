@@ -17,8 +17,10 @@ def fetch_single_simpcity_page(url, logger_func, cookies=None, post_id=None):
     
     try:
         response = scraper.get(url, timeout=30, headers=headers, cookies=cookies)
+        final_url = response.url # Capture the final URL after any redirects
+        
         if response.status_code == 404:
-            return None, []
+            return None, [], final_url
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -91,9 +93,9 @@ def fetch_single_simpcity_page(url, logger_func, cookies=None, post_id=None):
             # We use a set to remove duplicate URLs that might be found in multiple ways
             unique_jobs = list({job['url']: job for job in jobs_on_page}.values())
             logger_func(f"   [SimpCity] Scraper found jobs: {[job['type'] for job in unique_jobs]}")
-            return album_title, unique_jobs
+            return album_title, unique_jobs, final_url
 
-        return album_title, []
+        return album_title, [], final_url
 
     except Exception as e:
         logger_func(f"   [SimpCity] ❌ Error fetching page {url}: {e}")
