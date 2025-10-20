@@ -104,6 +104,7 @@ from .classes.drive_downloader_thread import DriveDownloadThread
 from .classes.external_link_downloader_thread import ExternalLinkDownloadThread
 from .classes.nhentai_downloader_thread import NhentaiDownloadThread
 from .classes.downloader_factory import create_downloader_thread
+from .classes.kemono_discord_downloader_thread import KemonoDiscordDownloadThread
 
 _ff_ver = (datetime.date.today().toordinal() - 735506) // 28
 USERAGENT_FIREFOX = (f"Mozilla/5.0 (Windows NT 10.0; Win64; x64; "
@@ -333,7 +334,7 @@ class DownloaderApp (QWidget ):
         self.download_location_label_widget = None
         self.remove_from_filename_label_widget = None
         self.skip_words_label_widget = None
-        self.setWindowTitle("Kemono Downloader v7.5.1")
+        self.setWindowTitle("Kemono Downloader v7.5.2")
         setup_ui(self)
         self._connect_signals()
         if hasattr(self, 'character_input'):
@@ -494,6 +495,8 @@ class DownloaderApp (QWidget ):
 
     def _connect_specialized_thread_signals(self, thread):
         """Connects common signals for specialized downloader threads."""
+
+        is_kemono_discord = isinstance(thread, KemonoDiscordDownloadThread)        
         if hasattr(thread, 'progress_signal'):
             thread.progress_signal.connect(self.handle_main_log)
         if hasattr(thread, 'file_progress_signal'):
@@ -507,6 +510,10 @@ class DownloaderApp (QWidget ):
             )
         if hasattr(thread, 'progress_label_signal'): # For Discord thread
             thread.progress_label_signal.connect(self.progress_label.setText)
+
+        if is_kemono_discord and hasattr(thread, 'permanent_file_failed_signal'):
+            thread.permanent_file_failed_signal.connect(self._handle_permanent_file_failure_from_thread)
+            print("DEBUG: Connected permanent_file_failed_signal for KemonoDiscordDownloadThread.") # Debug print
 
     def _apply_theme_and_restart_prompt(self):
         """Applies the theme and prompts the user to restart."""

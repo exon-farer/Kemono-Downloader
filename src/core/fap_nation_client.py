@@ -69,15 +69,28 @@ def fetch_fap_nation_data(album_url, logger_func):
 
             if direct_links_found:
                 logger_func(f"   [Fap-Nation] Found {len(direct_links_found)} direct media link(s). Selecting the best quality...")
-                best_link = direct_links_found[0]
-                for link in direct_links_found:
-                    if '1080p' in link.lower():
-                        best_link = link
-                        break
+                best_link = None
+                # Define qualities from highest to lowest
+                qualities_to_check = ['1080p', '720p', '480p', '360p']
+                
+                # Find the best quality link by iterating through preferred qualities
+                for quality in qualities_to_check:
+                    for link in direct_links_found:
+                        if quality in link.lower():
+                            best_link = link
+                            logger_func(f"   [Fap-Nation] Found '{quality}' link: {best_link}")
+                            break  # Found the best link for this quality level
+                    if best_link:
+                        break # Found the highest quality available
+
+                # Fallback if no quality string was found in any link
+                if not best_link:
+                    best_link = direct_links_found[0]
+                    logger_func(f"   [Fap-Nation] ⚠️ No quality tags (1080p, 720p, etc.) found in links. Defaulting to first link: {best_link}")
+
                 final_url = best_link
                 link_type = 'direct'
                 logger_func(f"   [Fap-Nation] Identified direct media link: {final_url}")
-
         # If after all checks, we still have no URL, then fail.
         if not final_url:
             logger_func("   [Fap-Nation] ❌ Stage 1 Failed: Could not find any HLS stream or direct link.")
