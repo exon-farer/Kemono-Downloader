@@ -1,8 +1,6 @@
-# src/core/Hentai2read_client.py
-
 import re
 import os
-import time
+import time 
 import cloudscraper
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
@@ -65,12 +63,37 @@ def run_hentai2read_download(start_url, output_dir, progress_callback, overall_p
 def _get_series_metadata(start_url, progress_callback, scraper):
     """
     Scrapes the main series page to get the Artist Name, Series Title, and chapter list.
+    Includes a retry mechanism for the initial connection.
     """
-    try:
-        response = scraper.get(start_url, timeout=30)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
+    max_retries = 4  # Total number of attempts (1 initial + 3 retries)
+    last_exception = None
+    soup = None
 
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                progress_callback(f"   [Hentai2Read] ⚠️ Retrying connection (Attempt {attempt + 1}/{max_retries})...")
+            
+            response = scraper.get(start_url, timeout=30)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # If successful, clear exception and break the loop
+            last_exception = None
+            break
+
+        except Exception as e:
+            last_exception = e
+            progress_callback(f"   [Hentai2Read] ⚠️ Connection attempt {attempt + 1} failed: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 * (attempt + 1))  # Wait 2s, 4s, 6s
+            continue  # Try again
+
+    if last_exception:
+        progress_callback(f"   [Hentai2Read] ❌ Error getting series metadata after {max_retries} attempts: {last_exception}")
+        return "Unknown Series", []
+
+    try:
         series_title = "Unknown Series"
         artist_name = None
         metadata_list = soup.select_one("ul.list.list-simple-mini")
@@ -107,10 +130,9 @@ def _get_series_metadata(start_url, progress_callback, scraper):
         return top_level_folder_name, chapters_to_process
 
     except Exception as e:
-        progress_callback(f"   [Hentai2Read] ❌ Error getting series metadata: {e}")
+        progress_callback(f"   [Hentai2Read] ❌ Error parsing metadata after successful connection: {e}")
         return "Unknown Series", []
 
-### NEW: This function contains the pipeline logic ###
 def _process_and_download_chapter(chapter_url, save_path, scraper, progress_callback, check_pause_func):
     """
     Uses a producer-consumer pattern to download a chapter.
@@ -120,12 +142,10 @@ def _process_and_download_chapter(chapter_url, save_path, scraper, progress_call
     task_queue = queue.Queue()
     num_download_threads = 8
     
-    # These will be updated by the worker threads
     download_stats = {'downloaded': 0, 'skipped': 0}
 
     def downloader_worker():
         """The function that each download thread will run."""
-        # Create a unique session for each thread to avoid conflicts
         worker_scraper = cloudscraper.create_scraper()
         while True:
             try:
@@ -153,12 +173,10 @@ def _process_and_download_chapter(chapter_url, save_path, scraper, progress_call
             finally:
                 task_queue.task_done()
 
-    # --- Start the downloader threads ---
     executor = ThreadPoolExecutor(max_workers=num_download_threads, thread_name_prefix='H2R_Downloader')
     for _ in range(num_download_threads):
         executor.submit(downloader_worker)
 
-    # --- Main thread acts as the scraper (producer) ---
     page_number = 1
     while True:
         if check_pause_func(): break
@@ -168,12 +186,25 @@ def _process_and_download_chapter(chapter_url, save_path, scraper, progress_call
         
         page_url_to_check = f"{chapter_url}{page_number}/"
         try:
-            response = scraper.get(page_url_to_check, timeout=30)
-            if response.history or response.status_code != 200:
+            page_response = None
+            page_last_exception = None
+            for page_attempt in range(3): # 3 attempts for sub-pages
+                try:
+                    page_response = scraper.get(page_url_to_check, timeout=30)
+                    page_last_exception = None
+                    break
+                except Exception as e:
+                    page_last_exception = e
+                    time.sleep(1) # Short delay for page scraping retries
+            
+            if page_last_exception:
+                raise page_last_exception # Give up after 3 tries
+
+            if page_response.history or page_response.status_code != 200:
                 progress_callback(f"   [Hentai2Read] End of chapter detected on page {page_number}.")
                 break
 
-            soup = BeautifulSoup(response.text, 'html.parser')
+            soup = BeautifulSoup(page_response.text, 'html.parser')
             img_tag = soup.select_one("img#arf-reader")
             img_src = img_tag.get("src") if img_tag else None
 
@@ -181,12 +212,11 @@ def _process_and_download_chapter(chapter_url, save_path, scraper, progress_call
                 progress_callback(f"   [Hentai2Read] End of chapter detected (Placeholder image on page {page_number}).")
                 break
             
-            normalized_img_src = urljoin(response.url, img_src)
+            normalized_img_src = urljoin(page_response.url, img_src)
             ext = os.path.splitext(normalized_img_src.split('/')[-1])[-1] or ".jpg"
             filename = f"{page_number:03d}{ext}"
             filepath = os.path.join(save_path, filename)
             
-            # Put the download task into the queue for a worker to pick up
             task_queue.put((filepath, normalized_img_src))
             
             page_number += 1
@@ -195,12 +225,9 @@ def _process_and_download_chapter(chapter_url, save_path, scraper, progress_call
             progress_callback(f"   [Hentai2Read] ❌ Error while scraping page {page_number}: {e}")
             break
             
-    # --- Shutdown sequence ---
-    # Tell all worker threads to exit by sending the sentinel value
     for _ in range(num_download_threads):
         task_queue.put(None)
     
-    # Wait for all download tasks to be completed
     executor.shutdown(wait=True)
     
     progress_callback(f"   Found and processed {page_number - 1} images for this chapter.")

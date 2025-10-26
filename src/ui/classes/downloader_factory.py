@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 # Utility Imports
 from ...utils.network_utils import prepare_cookies_for_request
-from ...utils.file_utils import clean_folder_name # Keep if needed by any thread init
+from ...utils.file_utils import clean_folder_name 
 
 # Downloader Thread Imports (Alphabetical Order Recommended)
 from .allcomic_downloader_thread import AllcomicDownloadThread
@@ -16,7 +16,6 @@ from .erome_downloader_thread import EromeDownloadThread
 from .external_link_downloader_thread import ExternalLinkDownloadThread
 from .fap_nation_downloader_thread import FapNationDownloadThread
 from .hentai2read_downloader_thread import Hentai2readDownloadThread
-# ---> ADD IMPORT FOR NEW KEMONO DISCORD THREAD <---
 from .kemono_discord_downloader_thread import KemonoDiscordDownloadThread
 from .mangadex_downloader_thread import MangaDexDownloadThread
 from .nhentai_downloader_thread import NhentaiDownloadThread
@@ -34,7 +33,6 @@ def create_downloader_thread(main_app, api_url, service, id1, id2, effective_out
     or None if no special handler is found (indicating fallback to generic BackendDownloadThread).
     """
 
-    # --- Specific Site/Service Handlers ---
 
     # Handler for Booru sites (Danbooru, Gelbooru)
     if service in ['danbooru', 'gelbooru']:
@@ -68,7 +66,6 @@ def create_downloader_thread(main_app, api_url, service, id1, id2, effective_out
         return MangaDexDownloadThread(api_url, effective_output_dir_for_run, main_app)
 
     # Handler for Saint2
-    # Check specific domains identified by extract_post_info or common patterns
     is_saint2_url = service == 'saint2' or 'saint2.su' in api_url or 'saint2.pk' in api_url # Add more domains if needed
     if is_saint2_url and api_url.strip().lower() != 'saint2.su': # Exclude batch mode trigger if using URL input
         return Saint2DownloadThread(api_url, effective_output_dir_for_run, main_app)
@@ -93,7 +90,7 @@ def create_downloader_thread(main_app, api_url, service, id1, id2, effective_out
         main_app.log_signal.emit("ℹ️ Rule34Video.com URL detected. Starting dedicated downloader.")
         return Rule34VideoDownloadThread(api_url, effective_output_dir_for_run, main_app) # id1 (video_id) is used inside the thread
 
-    # ---> HANDLER FOR KEMONO DISCORD (Place BEFORE official Discord) <---
+    # HANDLER FOR KEMONO DISCORD (Place BEFORE official Discord)
     elif service == 'discord' and any(domain in api_url for domain in ['kemono.cr', 'kemono.su', 'kemono.party']):
         main_app.log_signal.emit("ℹ️ Kemono Discord URL detected. Starting dedicated downloader.")
         cookies = prepare_cookies_for_request(
@@ -119,8 +116,6 @@ def create_downloader_thread(main_app, api_url, service, id1, id2, effective_out
         token = main_app.remove_from_filename_input.text().strip() # Token is in the "Remove Words" field for Discord
         if not token:
              main_app.log_signal.emit("❌ Official Discord requires an Authorization Token in the 'Remove Words' field.")
-             # Optionally show a message box here
-             # QMessageBox.warning(main_app, "Token Required", "Please enter your Discord Authorization Token in the 'Remove Words from name' field.")
              return None # Or a specific error sentinel
 
         limit_text = main_app.discord_message_limit_input.text().strip()
@@ -140,7 +135,6 @@ def create_downloader_thread(main_app, api_url, service, id1, id2, effective_out
             parent=main_app # Pass main_app for events/signals
         )
 
-    # Handler for Allcomic/Allporncomic
     # Check specific domains or rely on service name if extract_post_info provides it
     if service == 'allcomic' or 'allcomic.com' in api_url or 'allporncomic.com' in api_url:
         return AllcomicDownloadThread(api_url, effective_output_dir_for_run, main_app)
@@ -164,7 +158,6 @@ def create_downloader_thread(main_app, api_url, service, id1, id2, effective_out
 
     # Handler for nHentai
     if service == 'nhentai':
-        # nHentai requires fetching data *before* creating the thread
         from ...core.nhentai_client import fetch_nhentai_gallery
         main_app.log_signal.emit(f"ℹ️ nHentai gallery ID {id1} detected. Fetching gallery data...")
         gallery_data = fetch_nhentai_gallery(id1, main_app.log_signal.emit)

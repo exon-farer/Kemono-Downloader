@@ -339,11 +339,9 @@ class DownloaderApp (QWidget ):
         self._connect_signals()
         if hasattr(self, 'character_input'):
             self.character_input.setToolTip(self._tr("character_input_tooltip", "Enter character names (comma-separated)..."))
-        self.log_signal.emit(f"ℹ️ Manga filename style loaded: '{self.manga_filename_style}'")
+        self.log_signal.emit(f"ℹ️ filename style loaded: '{self.manga_filename_style}'")
         self.log_signal.emit(f"ℹ️ Skip words scope loaded: '{self.skip_words_scope}'")
         self.log_signal.emit(f"ℹ️ Character filter scope set to default: '{self.char_filter_scope}'")
-        self.log_signal.emit(f"ℹ️ Multi-part download defaults to: {'Enabled' if self.allow_multipart_download_setting else 'Disabled'}")
-        self.log_signal.emit(f"ℹ️ Scan post content for images defaults to: {'Enabled' if self.scan_content_images_setting else 'Disabled'}")
         self.log_signal.emit(f"ℹ️ Application language loaded: '{self.current_selected_language.upper()}' (UI may not reflect this yet).")
         self._retranslate_main_ui()
         self._load_persistent_history()
@@ -831,14 +829,11 @@ class DownloaderApp (QWidget ):
                 self.download_btn.setEnabled(False)
                 self.pause_btn.setEnabled(False)
             else:
-                # --- START MODIFICATION ---
-                # Check if we are about to download fetched posts and update text accordingly
                 if self.is_ready_to_download_fetched:
                     num_posts = len(self.fetched_posts_for_download)
                     self.download_btn.setText(f"⬇️ Start Download ({num_posts} Posts)")
                     self.download_btn.setEnabled(True) # Keep it enabled for the user to click
                 else:
-                    # Original logic for an active download in other scenarios
                     self.download_btn.setText(self._tr("start_download_button_text", "⬇️ Start Download"))
                     self.download_btn.setEnabled(False)
                 
@@ -926,11 +921,9 @@ class DownloaderApp (QWidget ):
         
         args_template = self.last_start_download_args
         
-        # Update both the character filter list and the domain override in the arguments
         args_template['filter_character_list'] = parsed_filters
         args_template['domain_override'] = domain_override
         
-        # Manually set the UI to a "downloading" state for reliability
         self.set_ui_enabled(False)
         self.download_btn.setText("⬇️ Downloading...")
         self.download_btn.setEnabled(False)
@@ -938,7 +931,6 @@ class DownloaderApp (QWidget ):
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.setText("❌ Cancel & Reset UI")
         try:
-            # Ensure signals are connected to the correct actions for this state
             self.cancel_btn.clicked.disconnect()
             self.pause_btn.clicked.disconnect()
         except TypeError:
@@ -5626,13 +5618,11 @@ class DownloaderApp (QWidget ):
             api_domain = parsed_api_url.netloc if parsed_api_url.netloc else self._get_domain_for_service(service)
             post_page_url = f"https://{api_domain}/{service}/user/{user_id}/post/{post_id}"
         
-        # --- NEW LOGIC: Differentiate between loaded files and live session errors ---
         # Initialize variables before the conditional blocks
         target_folder_path_for_download = None
         filename_override_for_download = None
         
         if job_details.get('is_loaded_from_txt'):
-            # --- BEHAVIOR FOR LOADED FILES: Recalculate everything from current UI settings ---
             self.log_signal.emit(f"   Retrying loaded file. Recalculating path and name from current UI settings...")
 
             # 1. Get all current settings and job data
@@ -6325,10 +6315,8 @@ class DownloaderApp (QWidget ):
                     if hasattr(self, 'link_input'):
                         self.last_link_input_text_for_queue_sync = self.link_input.text()
 
-                # --- START: MODIFIED LOGIC ---
                 # Manually trigger the UI update now that the queue is populated and the dialog is closed.
                 self.update_ui_for_manga_mode(self.manga_mode_checkbox.isChecked() if self.manga_mode_checkbox else False)
-                # --- END: MODIFIED LOGIC ---
 
     def _load_saved_cookie_settings(self):
         """Loads and applies saved cookie settings on startup."""

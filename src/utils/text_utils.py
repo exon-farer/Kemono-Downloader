@@ -26,6 +26,16 @@ KNOWN_TXT_MATCH_CLEANUP_PATTERNS = [
     r'\bPreview\b',
 ]
 
+# --- START NEW CODE ---
+# Regular expression to detect CJK characters
+# Covers Hiragana, Katakana, Half/Full width forms, CJK Unified Ideographs, Hangul Syllables, etc.
+cjk_pattern = re.compile(r'[\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uffef\u4e00-\u9fff\uac00-\ud7af]')
+
+def contains_cjk(text):
+    """Checks if the text contains any CJK characters."""
+    return bool(cjk_pattern.search(text))
+# --- END NEW CODE ---
+
 # --- Text Matching and Manipulation Utilities ---
 
 def is_title_match_for_character(post_title, character_name_filter):
@@ -42,7 +52,7 @@ def is_title_match_for_character(post_title, character_name_filter):
     """
     if not post_title or not character_name_filter:
         return False
-        
+
     # Use word boundaries (\b) to match whole words only
     pattern = r"(?i)\b" + re.escape(str(character_name_filter).strip()) + r"\b"
     return bool(re.search(pattern, post_title))
@@ -62,7 +72,7 @@ def is_filename_match_for_character(filename, character_name_filter):
     """
     if not filename or not character_name_filter:
         return False
-        
+
     return str(character_name_filter).strip().lower() in filename.lower()
 
 
@@ -101,16 +111,16 @@ def extract_folder_name_from_title(title, unwanted_keywords):
     """
     if not title:
         return 'Uncategorized'
-        
+
     title_lower = title.lower()
     # Find all whole words in the title
     tokens = re.findall(r'\b[\w\-]+\b', title_lower)
-    
+
     for token in tokens:
         clean_token = clean_folder_name(token)
         if clean_token and clean_token.lower() not in unwanted_keywords:
             return clean_token
-            
+
     # Fallback to cleaning the full title if no single significant word is found
     cleaned_full_title = clean_folder_name(title)
     return cleaned_full_title if cleaned_full_title else 'Uncategorized'
@@ -120,6 +130,7 @@ def match_folders_from_title(title, names_to_match, unwanted_keywords):
     """
     Matches folder names from a title based on a list of known name objects.
     Each name object is a dict: {'name': 'PrimaryName', 'aliases': ['alias1', ...]}
+    MODIFIED: Uses substring matching for CJK aliases, word boundary for others.
 
     Args:
         title (str): The post title to check.
@@ -137,10 +148,11 @@ def match_folders_from_title(title, names_to_match, unwanted_keywords):
     for pat_str in KNOWN_TXT_MATCH_CLEANUP_PATTERNS:
         cleaned_title = re.sub(pat_str, ' ', cleaned_title, flags=re.IGNORECASE)
     cleaned_title = re.sub(r'\s+', ' ', cleaned_title).strip()
+    # Store both original case cleaned title and lower case for different matching
     title_lower = cleaned_title.lower()
 
     matched_cleaned_names = set()
-    
+
     # Sort by name length descending to match longer names first (e.g., "Cloud Strife" before "Cloud")
     sorted_name_objects = sorted(names_to_match, key=lambda x: len(x.get("name", "")), reverse=True)
 
@@ -149,19 +161,43 @@ def match_folders_from_title(title, names_to_match, unwanted_keywords):
         aliases = name_obj.get("aliases", [])
         if not primary_folder_name or not aliases:
             continue
-            
+
+        # <<< START MODIFICATION >>>
+        cleaned_primary_name = clean_folder_name(primary_folder_name)
+        if not cleaned_primary_name or cleaned_primary_name.lower() in unwanted_keywords:
+            continue # Skip this entry entirely if its primary name is unwanted or empty
+
+        match_found_for_this_object = False
         for alias in aliases:
+            if not alias: continue
             alias_lower = alias.lower()
-            if not alias_lower: continue
-            
-            # Use word boundaries for accurate matching
-            pattern = r'\b' + re.escape(alias_lower) + r'\b'
-            if re.search(pattern, title_lower):
-                cleaned_primary_name = clean_folder_name(primary_folder_name)
-                if cleaned_primary_name.lower() not in unwanted_keywords:
+
+            # Check if the alias contains CJK characters
+            if contains_cjk(alias):
+                # Use simple substring matching for CJK
+                if alias_lower in title_lower:
                     matched_cleaned_names.add(cleaned_primary_name)
-                    break # Move to the next name object once a match is found for this one
-                    
+                    match_found_for_this_object = True
+                    break # Move to the next name object
+            else:
+                # Use original word boundary matching for non-CJK
+                try:
+                    # Compile pattern for efficiency if used repeatedly, though here it changes each loop
+                    pattern = r'\b' + re.escape(alias_lower) + r'\b'
+                    if re.search(pattern, title_lower):
+                        matched_cleaned_names.add(cleaned_primary_name)
+                        match_found_for_this_object = True
+                        break # Move to the next name object
+                except re.error as e:
+                    # Log error if the alias creates an invalid regex (unlikely with escape)
+                    print(f"Regex error for alias '{alias}': {e}") # Or use proper logging
+                    continue
+
+        # This outer break logic remains the same (though slightly redundant with inner breaks)
+        if match_found_for_this_object:
+             pass # Already added and broke inner loop
+        # <<< END MODIFICATION >>>
+
     return sorted(list(matched_cleaned_names))
 
 
@@ -188,23 +224,26 @@ def match_folders_from_filename_enhanced(filename, names_to_match, unwanted_keyw
     for name_obj in names_to_match:
         primary_name = name_obj.get("name")
         if not primary_name: continue
-        
+
         cleaned_primary_name = clean_folder_name(primary_name)
         if not cleaned_primary_name or cleaned_primary_name.lower() in unwanted_keywords:
             continue
 
         for alias in name_obj.get("aliases", []):
-            if alias.lower():
-                alias_map_to_primary.append((alias.lower(), cleaned_primary_name))
-    
+            # <<< MODIFICATION: Ensure alias is not empty before converting to lower case >>>
+            if alias: # Check if alias is not None and not an empty string
+                alias_lower_val = alias.lower()
+                if alias_lower_val: # Check again after lowercasing (handles case where alias might be just spaces)
+                    alias_map_to_primary.append((alias_lower_val, cleaned_primary_name))
+
     # Sort by alias length, descending, to match longer aliases first
     alias_map_to_primary.sort(key=lambda x: len(x[0]), reverse=True)
 
-    # <<< MODIFICATION: Return the FIRST match found, which will be the longest >>>
+    # Return the FIRST match found, which will be the longest
     for alias_lower, primary_name_for_alias in alias_map_to_primary:
         if alias_lower in filename_lower:
             # Found the longest possible alias that is a substring. Return immediately.
             return [primary_name_for_alias]
-            
+
     # If the loop finishes without any matches, return an empty list.
     return []
