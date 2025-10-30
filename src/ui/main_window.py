@@ -5546,6 +5546,7 @@ class DownloaderApp (QWidget ):
         'known_names':list (KNOWN_NAMES ),
         'emitter':self .worker_to_gui_queue ,
         'unwanted_keywords':{'spicy','hd','nsfw','4k','preview','teaser','clip'},
+        'creator_name_cache': self.creator_name_cache,
         'domain_override': domain_override_command,
         'sfp_threshold': sfp_threshold_command, 
         'handle_unknown_mode': handle_unknown_command, 
@@ -6214,7 +6215,7 @@ class DownloaderApp (QWidget ):
             'manga_date_prefix': self.manga_date_prefix_input.text().strip(), 
             'manga_date_file_counter_ref': None,
             'scan_content_for_images': self.scan_content_images_checkbox.isChecked(),
-            
+            'creator_name_cache': self.creator_name_cache,            
             'creator_download_folder_ignore_words': creator_folder_ignore_words_for_run,
             'num_file_threads_for_worker': effective_num_file_threads_per_worker,
             'multipart_scope': 'files',

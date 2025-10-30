@@ -52,7 +52,7 @@ from ..utils.file_utils import (
 from ..utils.network_utils import prepare_cookies_for_request, get_link_platform
 from ..utils.text_utils import (
     is_title_match_for_character, is_filename_match_for_character, strip_html_tags,
-    extract_folder_name_from_title, # This was the function causing the error
+    extract_folder_name_from_title, 
     match_folders_from_title, match_folders_from_filename_enhanced
 )
 from ..config.constants import *
