@@ -205,6 +205,8 @@ def match_folders_from_filename_enhanced(filename, names_to_match, unwanted_keyw
     """
     Matches folder names from a filename, prioritizing longer and more specific aliases.
     It returns immediately after finding the first (longest) match.
+    MODIFIED: Prioritizes boundary-aware matches for Latin characters,
+    falls back to substring search for CJK compatibility.
 
     Args:
         filename (str): The filename to check.
@@ -230,10 +232,9 @@ def match_folders_from_filename_enhanced(filename, names_to_match, unwanted_keyw
             continue
 
         for alias in name_obj.get("aliases", []):
-            # <<< MODIFICATION: Ensure alias is not empty before converting to lower case >>>
             if alias: # Check if alias is not None and not an empty string
                 alias_lower_val = alias.lower()
-                if alias_lower_val: # Check again after lowercasing (handles case where alias might be just spaces)
+                if alias_lower_val: # Check again after lowercasing
                     alias_map_to_primary.append((alias_lower_val, cleaned_primary_name))
 
     # Sort by alias length, descending, to match longer aliases first
@@ -241,9 +242,33 @@ def match_folders_from_filename_enhanced(filename, names_to_match, unwanted_keyw
 
     # Return the FIRST match found, which will be the longest
     for alias_lower, primary_name_for_alias in alias_map_to_primary:
-        if alias_lower in filename_lower:
-            # Found the longest possible alias that is a substring. Return immediately.
-            return [primary_name_for_alias]
+        try:
+            # 1. Attempt boundary-aware match first (good for English/Latin)
+            # Matches alias if it's at the start/end or surrounded by common separators
+            # We use word boundaries (\b) and also check for common non-word separators like +_-
+            pattern = r'(?:^|[\s_+-])' + re.escape(alias_lower) + r'(?:[\s_+-]|$)'
+            
+            if re.search(pattern, filename_lower):
+                # Found a precise, boundary-aware match. This is the best case.
+                return [primary_name_for_alias]
+
+            # 2. Fallback: Simple substring check (for CJK or other cases)
+            # This executes ONLY if the boundary match above failed.
+            # We check if the alias contains CJK OR if the filename does.
+            # This avoids applying the simple 'in' check for Latin-only aliases in Latin-only filenames.
+            elif (contains_cjk(alias_lower) or contains_cjk(filename_lower)) and alias_lower in filename_lower:
+                # This is the fallback for CJK compatibility.
+                return [primary_name_for_alias]
+                
+            # If alias is "ul" and filename is "sin+título":
+            # 1. re.search(r'(?:^|[\s_+-])ul(?:[\s_+-]|$)', "sin+título") -> Fails (good)
+            # 2. contains_cjk("ul") -> False
+            # 3. contains_cjk("sin+título") -> False
+            # 4. No match is found for "ul". (correct)
+
+        except re.error as e:
+            print(f"Regex error matching alias '{alias_lower}' in filename '{filename_lower}': {e}")
+            continue # Skip this alias if regex fails
 
     # If the loop finishes without any matches, return an empty list.
     return []

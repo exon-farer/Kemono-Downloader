@@ -1810,6 +1810,31 @@ class PostProcessorWorker:
 
             if not all_files_from_post_api:
                 self.logger(f"   No files found to download for post {post_id}.")
+                if not self.extract_links_only and should_create_post_subfolder:
+                    path_to_check_for_emptiness = determined_post_save_path_for_history
+                    try:
+                        if os.path.isdir(path_to_check_for_emptiness):
+                            dir_contents = os.listdir(path_to_check_for_emptiness)
+                            # Check if the directory is empty OR only contains our ID file
+                            is_effectively_empty = True
+                            if dir_contents:
+                                if not all(f.startswith('.postid_') for f in dir_contents):
+                                    is_effectively_empty = False
+                            
+                            if is_effectively_empty:
+                                self.logger(f"   🗑️ Removing empty post-specific subfolder (post had no files): '{path_to_check_for_emptiness}'")
+                                if dir_contents:
+                                    for id_file in dir_contents:
+                                        if id_file.startswith('.postid_'):
+                                            try:
+                                                os.remove(os.path.join(path_to_check_for_emptiness, id_file))
+                                            except OSError as e_rm_id:
+                                                self.logger(f"   ⚠️ Could not remove ID file '{id_file}' during cleanup: {e_rm_id}")
+                                os.rmdir(path_to_check_for_emptiness)
+                    except OSError as e_rmdir:
+                        self.logger(f"   ⚠️ Could not remove effectively empty subfolder (no files) '{path_to_check_for_emptiness}': {e_rmdir}")
+                # --- END NEW CLEANUP LOGIC ---
+
                 history_data_for_no_files_post = {
                     'post_title': post_title,
                     'post_id': post_id,
@@ -1823,7 +1848,7 @@ class PostProcessorWorker:
                 result_tuple = (0, 0, [], [], [], history_data_for_no_files_post, None)
                 self._emit_signal('worker_finished', result_tuple)
                 return result_tuple
-
+                
             files_to_download_info_list = []
             processed_original_filenames_in_this_post = set()
             if self.keep_in_post_duplicates:
@@ -2052,9 +2077,27 @@ class PostProcessorWorker:
             if not self.extract_links_only and self.use_post_subfolders and total_downloaded_this_post == 0:
                 path_to_check_for_emptiness = determined_post_save_path_for_history
                 try:
-                    if os.path.isdir(path_to_check_for_emptiness) and not os.listdir(path_to_check_for_emptiness):
-                        self.logger(f"   🗑️ Removing empty post-specific subfolder: '{path_to_check_for_emptiness}'")
-                        os.rmdir(path_to_check_for_emptiness)
+                    if os.path.isdir(path_to_check_for_emptiness):
+                        dir_contents = os.listdir(path_to_check_for_emptiness)
+                        # Check if the directory is empty OR only contains our ID file
+                        is_effectively_empty = True
+                        if dir_contents:
+                            # If there are files, check if ALL of them are .postid files
+                            if not all(f.startswith('.postid_') for f in dir_contents):
+                                is_effectively_empty = False
+                        
+                        if is_effectively_empty:
+                            self.logger(f"   🗑️ Removing empty post-specific subfolder (no files downloaded): '{path_to_check_for_emptiness}'")
+                            # We must first remove the ID file(s) before removing the dir
+                            if dir_contents:
+                                for id_file in dir_contents:
+                                    if id_file.startswith('.postid_'):
+                                        try:
+                                            os.remove(os.path.join(path_to_check_for_emptiness, id_file))
+                                        except OSError as e_rm_id:
+                                            self.logger(f"   ⚠️ Could not remove ID file '{id_file}' during cleanup: {e_rm_id}")
+                            
+                            os.rmdir(path_to_check_for_emptiness) # Now the rmdir should work
                 except OSError as e_rmdir:
                     self.logger(f"   ⚠️ Could not remove empty post-specific subfolder '{path_to_check_for_emptiness}': {e_rmdir}")
 
@@ -2066,11 +2109,29 @@ class PostProcessorWorker:
             if not self.extract_links_only and self.use_post_subfolders and total_downloaded_this_post == 0:
                 path_to_check_for_emptiness = determined_post_save_path_for_history
                 try:
-                    if os.path.isdir(path_to_check_for_emptiness) and not os.listdir(path_to_check_for_emptiness):
-                        self.logger(f"   🗑️ Removing empty post-specific subfolder: '{path_to_check_for_emptiness}'")
-                        os.rmdir(path_to_check_for_emptiness)
+                    if os.path.isdir(path_to_check_for_emptiness):
+                        dir_contents = os.listdir(path_to_check_for_emptiness)
+                        # Check if the directory is empty OR only contains our ID file
+                        is_effectively_empty = True
+                        if dir_contents:
+                            # If there are files, check if ALL of them are .postid files
+                            if not all(f.startswith('.postid_') for f in dir_contents):
+                                is_effectively_empty = False
+                        
+                        if is_effectively_empty:
+                            self.logger(f"   🗑️ Removing empty post-specific subfolder (no files downloaded): '{path_to_check_for_emptiness}'")
+                            # We must first remove the ID file(s) before removing the dir
+                            if dir_contents:
+                                for id_file in dir_contents:
+                                    if id_file.startswith('.postid_'):
+                                        try:
+                                            os.remove(os.path.join(path_to_check_for_emptiness, id_file))
+                                        except OSError as e_rm_id:
+                                            self.logger(f"   ⚠️ Could not remove ID file '{id_file}' during cleanup: {e_rm_id}")
+                            
+                            os.rmdir(path_to_check_for_emptiness) # Now the rmdir should work
                 except OSError as e_rmdir:
-                    self.logger(f"   ⚠️ Could not remove potentially empty subfolder '{path_to_check_for_emptiness}': {e_rmdir}")
+                    self.logger(f"   ⚠️ Could not remove empty post-specific subfolder '{path_to_check_for_emptiness}': {e_rmdir}")
             
             self._emit_signal('worker_finished', result_tuple)
             return result_tuple
