@@ -3183,8 +3183,7 @@ class DownloaderApp (QWidget ):
             self .update_custom_folder_visibility ()
             self .update_page_range_enabled_state ()
             if self .manga_mode_checkbox :
-                self .manga_mode_checkbox .setChecked (False )
-                self .manga_mode_checkbox .setEnabled (False )
+                pass
             if hasattr (self ,'use_cookie_checkbox'):
                 self .use_cookie_checkbox .setChecked (True )
                 self .use_cookie_checkbox .setEnabled (False )
@@ -3246,8 +3245,7 @@ class DownloaderApp (QWidget ):
             is_single_post = True
 
         # --- MODIFIED: Added check for is_discord_url ---
-        can_enable_manga_checkbox = (is_creator_feed or is_single_post) and not is_favorite_mode_on and not is_discord_url
-        
+        can_enable_manga_checkbox = ((is_creator_feed or is_single_post) or is_favorite_mode_on) and not is_discord_url        
         if self .manga_mode_checkbox :
             self .manga_mode_checkbox .setEnabled (can_enable_manga_checkbox)
             if not can_enable_manga_checkbox and self .manga_mode_checkbox .isChecked ():
