@@ -22,6 +22,8 @@ from ..main_window import get_app_icon_object
 from ...core.api_client import download_from_api
 from ...utils.network_utils import extract_post_info, prepare_cookies_for_request
 from ...utils.resolution import get_dark_theme
+# --- IMPORT THE NEW DIALOG ---
+from .UpdateCheckDialog import UpdateCheckDialog
 
 
 class PostsFetcherThread (QThread ):
@@ -151,8 +153,13 @@ class EmptyPopupDialog (QDialog ):
         app_icon =get_app_icon_object ()
         if app_icon and not app_icon .isNull ():
             self .setWindowIcon (app_icon )
+        
+        # --- MODIFIED: Store a list of profiles now ---
+        self.update_profiles_list = None
+        # --- DEPRECATED (kept for compatibility if needed, but new logic won't use them) ---
         self.update_profile_data = None
         self.update_creator_name = None
+        
         self .selected_creators_for_queue =[]
         self .globally_selected_creators ={}
         self .fetched_posts_data ={}
@@ -321,29 +328,34 @@ class EmptyPopupDialog (QDialog ):
                 pass 
 
     def _handle_update_check(self):
-        """Opens a dialog to select a creator profile and loads it for an update session."""
-        appdata_dir = os.path.join(self.app_base_dir, "appdata")
-        profiles_dir = os.path.join(appdata_dir, "creator_profiles")
+        """
+        --- MODIFIED FUNCTION ---
+        Opens the new UpdateCheckDialog instead of a QFileDialog.
+        If a profile is selected, it sets the dialog's result properties
+        and accepts the dialog, just like the old file dialog logic did.
+        """
+        # --- NEW BEHAVIOR ---
+        # Pass the app_base_dir and a reference to the main app (for translations/theme)
+        dialog = UpdateCheckDialog(self.app_base_dir, self.parent_app, self)
         
-        if not os.path.isdir(profiles_dir):
-            QMessageBox.warning(self, "Directory Not Found", f"The creator profiles directory does not exist yet.\n\nPath: {profiles_dir}")
-            return
-
-        filepath, _ = QFileDialog.getOpenFileName(self, "Select Creator Profile for Update", profiles_dir, "JSON Files (*.json)")
-
-        if filepath:
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                
-                if 'creator_url' not in data or 'processed_post_ids' not in data:
-                    raise ValueError("Invalid profile format.")
-
-                self.update_profile_data = data
-                self.update_creator_name = os.path.basename(filepath).replace('.json', '')
-                self.accept() # Close the dialog and signal success
-            except Exception as e:
-                QMessageBox.critical(self, "Error Loading Profile", f"Could not load or parse the selected profile file:\n\n{e}")
+        if dialog.exec_() == QDialog.Accepted:
+            # --- MODIFIED: Get a list of profiles now ---
+            selected_profiles = dialog.get_selected_profiles()
+            if selected_profiles:
+                try:
+                    # --- MODIFIED: Store the list ---
+                    self.update_profiles_list = selected_profiles
+                    
+                    # --- Set deprecated single-profile fields for backward compatibility (optional) ---
+                    # --- This helps if other parts of the main window still expect one profile ---
+                    self.update_profile_data = selected_profiles[0]['data']
+                    self.update_creator_name = selected_profiles[0]['name']
+                    
+                    self.accept() # Close EmptyPopupDialog and signal success to main_window
+                except Exception as e:
+                    QMessageBox.critical(self, "Error Loading Profile",
+                                         f"Could not process the selected profile data:\n\n{e}")
+        # --- END OF NEW BEHAVIOR ---
 
     def _handle_fetch_posts_click (self ):
         selected_creators =list (self .globally_selected_creators .values ())
@@ -981,9 +993,14 @@ class EmptyPopupDialog (QDialog ):
     def _handle_posts_close_view (self ):
         self .right_pane_widget .hide ()
         self .main_splitter .setSizes ([self .width (),0 ])
-        self .posts_list_widget .itemChanged .disconnect (self ._handle_post_item_check_changed )
+        
+        # --- MODIFIED: Added check before disconnect ---
         if hasattr (self ,'_handle_post_item_check_changed'):
-            self .posts_title_list_widget .itemChanged .disconnect (self ._handle_post_item_check_changed )
+            try:
+                self .posts_title_list_widget .itemChanged .disconnect (self ._handle_post_item_check_changed )
+            except TypeError:
+                pass # Already disconnected
+        
         self .posts_search_input .setVisible (False )
         self .posts_search_input .clear ()
         self .globally_selected_post_ids .clear ()

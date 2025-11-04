@@ -159,8 +159,6 @@ def download_from_api(
     if cancellation_event and cancellation_event.is_set():
         logger("   Download_from_api cancelled at start.")
         return
-
-    # The code that defined api_domain was moved from here to the top of the function
     
     if not any(d in api_domain.lower() for d in ['kemono.su', 'kemono.party', 'kemono.cr', 'coomer.su', 'coomer.party', 'coomer.st']):
         logger(f"⚠️ Unrecognized domain '{api_domain}' from input URL. Defaulting to kemono.su for API calls.")
@@ -312,6 +310,8 @@ def download_from_api(
         current_offset = (start_page - 1) * page_size
         current_page_num = start_page
         logger(f"   Starting from page {current_page_num} (calculated offset {current_offset}).")
+    
+    # --- START OF MODIFIED BLOCK ---
     while True:
         if pause_event and pause_event.is_set():
             logger("   Post fetching loop paused...")
@@ -321,18 +321,23 @@ def download_from_api(
                     break
                 time.sleep(0.5)
             if not (cancellation_event and cancellation_event.is_set()): logger("   Post fetching loop resumed.")
+        
         if cancellation_event and cancellation_event.is_set():
             logger("   Post fetching loop cancelled.")
             break
+            
         if target_post_id and processed_target_post_flag:
             break
+            
         if not target_post_id and end_page and current_page_num > end_page:
             logger(f"✅ Reached specified end page ({end_page}) for creator feed. Stopping.")
             break
+            
         try:
-            posts_batch = fetch_posts_paginated(api_base_url, headers, current_offset, logger, cancellation_event, pause_event, cookies_dict=cookies_for_api)
-            if not isinstance(posts_batch, list):
-                logger(f"❌ API Error: Expected list of posts, got {type(posts_batch)} at page {current_page_num} (offset {current_offset}).")
+            # 1. Fetch the raw batch of posts
+            raw_posts_batch = fetch_posts_paginated(api_base_url, headers, current_offset, logger, cancellation_event, pause_event, cookies_dict=cookies_for_api)
+            if not isinstance(raw_posts_batch, list):
+                logger(f"❌ API Error: Expected list of posts, got {type(raw_posts_batch)} at page {current_page_num} (offset {current_offset}).")
                 break
         except RuntimeError as e:
             if "cancelled by user" in str(e).lower():
@@ -344,14 +349,9 @@ def download_from_api(
             logger(f"❌ Unexpected error fetching page {current_page_num} (offset {current_offset}): {e}")
             traceback.print_exc()
             break
-        if processed_post_ids:
-            original_count = len(posts_batch)
-            posts_batch = [post for post in posts_batch if post.get('id') not in processed_post_ids]
-            skipped_count = original_count - len(posts_batch)
-            if skipped_count > 0:
-                logger(f"   Skipped {skipped_count} already processed post(s) from page {current_page_num}.")
-        
-        if not posts_batch:
+
+        # 2. Check if the *raw* batch from the API was empty. This is the correct "end" condition.
+        if not raw_posts_batch:
             if target_post_id and not processed_target_post_flag:
                 logger(f"❌ Target post {target_post_id} not found after checking all available pages (API returned no more posts at offset {current_offset}).")
             elif not target_post_id:
@@ -359,20 +359,45 @@ def download_from_api(
                     logger(f"😕 No posts found on the first page checked (page {current_page_num}, offset {current_offset}).")
                 else:
                     logger(f"✅ Reached end of posts (no more content from API at offset {current_offset}).")
-            break
+            break # This break is now correct.
+
+        # 3. Filter the batch against processed IDs
+        posts_batch_to_yield = raw_posts_batch
+        original_count = len(raw_posts_batch)
+        
+        if processed_post_ids:
+            posts_batch_to_yield = [post for post in raw_posts_batch if post.get('id') not in processed_post_ids]
+            skipped_count = original_count - len(posts_batch_to_yield)
+            if skipped_count > 0:
+                logger(f"   Skipped {skipped_count} already processed post(s) from page {current_page_num}.")
+
+        # 4. Process the *filtered* batch
         if target_post_id and not processed_target_post_flag:
-            matching_post = next((p for p in posts_batch if str(p.get('id')) == str(target_post_id)), None)
+            # Still searching for a specific post
+            matching_post = next((p for p in posts_batch_to_yield if str(p.get('id')) == str(target_post_id)), None)
             if matching_post:
                 logger(f"🎯 Found target post {target_post_id} on page {current_page_num} (offset {current_offset}).")
                 yield [matching_post]
                 processed_target_post_flag = True
         elif not target_post_id:
-            yield posts_batch
+            # Downloading a creator feed
+            if posts_batch_to_yield:
+                # We found new posts on this page, yield them
+                yield posts_batch_to_yield
+            elif original_count > 0:
+                # We found 0 new posts, but the page *did* have posts (they were just skipped).
+                # Log this and continue to the next page.
+                logger(f"   No new posts found on page {current_page_num}. Checking next page...")
+            # If original_count was 0, the `if not raw_posts_batch:` check
+            # already caught it and broke the loop.
+
         if processed_target_post_flag:
             break
+            
         current_offset += page_size
         current_page_num += 1
         time.sleep(0.6)
+    # --- END OF MODIFIED BLOCK ---
+        
     if target_post_id and not processed_target_post_flag and not (cancellation_event and cancellation_event.is_set()):
         logger(f"❌ Target post {target_post_id} could not be found after checking all relevant pages (final check after loop).")
-
