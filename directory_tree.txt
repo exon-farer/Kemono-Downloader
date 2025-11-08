@@ -1,0 +1,111 @@
+├── assets/
+│   ├── Kemono.ico
+│   ├── Kemono.png
+│   ├── Ko-fi.png
+│   ├── buymeacoffee.png
+│   ├── discord.png
+│   ├── github.png
+│   ├── instagram.png
+│   └── patreon.png
+├── data/
+│   ├── creators.json
+│   └── dejavu-sans/
+│       ├── DejaVu Fonts License.txt
+│       ├── DejaVuSans-Bold.ttf
+│       ├── DejaVuSans-BoldOblique.ttf
+│       ├── DejaVuSans-ExtraLight.ttf
+│       ├── DejaVuSans-Oblique.ttf
+│       ├── DejaVuSans.ttf
+│       ├── DejaVuSansCondensed-Bold.ttf
+│       ├── DejaVuSansCondensed-BoldOblique.ttf
+│       ├── DejaVuSansCondensed-Oblique.ttf
+│       └── DejaVuSansCondensed.ttf
+├── directory_tree.txt
+├── main.py
+├── src/
+│   ├── __init__.py
+│   ├── config/
+│   │   ├── __init__.py
+│   │   └── constants.py
+│   ├── core/
+│   │   ├── Hentai2read_client.py
+│   │   ├── __init__.py
+│   │   ├── allcomic_client.py
+│   │   ├── api_client.py
+│   │   ├── booru_client.py
+│   │   ├── bunkr_client.py
+│   │   ├── discord_client.py
+│   │   ├── erome_client.py
+│   │   ├── fap_nation_client.py
+│   │   ├── manager.py
+│   │   ├── mangadex_client.py
+│   │   ├── nhentai_client.py
+│   │   ├── pixeldrain_client.py
+│   │   ├── rule34video_client.py
+│   │   ├── saint2_client.py
+│   │   ├── simpcity_client.py
+│   │   ├── toonily_client.py
+│   │   └── workers.py
+│   ├── i18n/
+│   │   ├── __init__.py
+│   │   └── translator.py
+│   ├── services/
+│   │   ├── __init__.py
+│   │   ├── drive_downloader.py
+│   │   ├── multipart_downloader.py
+│   │   └── updater.py
+│   ├── ui/
+│   │   ├── __init__.py
+│   │   ├── assets.py
+│   │   ├── classes/
+│   │   │   ├── allcomic_downloader_thread.py
+│   │   │   ├── booru_downloader_thread.py
+│   │   │   ├── bunkr_downloader_thread.py
+│   │   │   ├── discord_downloader_thread.py
+│   │   │   ├── downloader_factory.py
+│   │   │   ├── drive_downloader_thread.py
+│   │   │   ├── erome_downloader_thread.py
+│   │   │   ├── external_link_downloader_thread.py
+│   │   │   ├── fap_nation_downloader_thread.py
+│   │   │   ├── hentai2read_downloader_thread.py
+│   │   │   ├── kemono_discord_downloader_thread.py
+│   │   │   ├── mangadex_downloader_thread.py
+│   │   │   ├── nhentai_downloader_thread.py
+│   │   │   ├── pixeldrain_downloader_thread.py
+│   │   │   ├── rule34video_downloader_thread.py
+│   │   │   ├── saint2_downloader_thread.py
+│   │   │   ├── simp_city_downloader_thread.py
+│   │   │   └── toonily_downloader_thread.py
+│   │   ├── dialogs/
+│   │   │   ├── ConfirmAddAllDialog.py
+│   │   │   ├── CookieHelpDialog.py
+│   │   │   ├── CustomFilenameDialog.py
+│   │   │   ├── DownloadExtractedLinksDialog.py
+│   │   │   ├── DownloadHistoryDialog.py
+│   │   │   ├── EmptyPopupDialog.py
+│   │   │   ├── ErrorFilesDialog.py
+│   │   │   ├── ExportLinksDialog.py
+│   │   │   ├── ExportOptionsDialog.py
+│   │   │   ├── FavoriteArtistsDialog.py
+│   │   │   ├── FavoritePostsDialog.py
+│   │   │   ├── FutureSettingsDialog.py
+│   │   │   ├── HelpGuideDialog.py
+│   │   │   ├── KeepDuplicatesDialog.py
+│   │   │   ├── KnownNamesFilterDialog.py
+│   │   │   ├── MoreOptionsDialog.py
+│   │   │   ├── MultipartScopeDialog.py
+│   │   │   ├── SinglePDF.py
+│   │   │   ├── SupportDialog.py
+│   │   │   ├── TourDialog.py
+│   │   │   ├── __init__.py
+│   │   │   └── discord_pdf_generator.py
+│   │   └── main_window.py
+│   └── utils/
+│       ├── __init__.py
+│       ├── command.py
+│       ├── file_utils.py
+│       ├── network_utils.py
+│       ├── resolution.py
+│       └── text_utils.py
+├── structure.py
+└── yt-dlp.exe
