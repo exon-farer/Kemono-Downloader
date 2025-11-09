@@ -21,10 +21,10 @@ class UpdateCheckDialog(QDialog):
     and allows the user to select multiple to check for updates.
     """
     
-    def __init__(self, app_base_dir, parent_app_ref, parent=None):
+    def __init__(self, user_data_path, parent_app_ref, parent=None):
         super().__init__(parent)
         self.parent_app = parent_app_ref
-        self.app_base_dir = app_base_dir
+        self.user_data_path = user_data_path
         self.selected_profiles_list = [] # Will store a list of {'name': ..., 'data': ...}
 
         self._init_ui()
@@ -100,7 +100,7 @@ class UpdateCheckDialog(QDialog):
 
     def _load_profiles(self):
         """Loads all .json files from the creator_profiles directory as checkable items."""
-        appdata_dir = os.path.join(self.app_base_dir, "appdata")
+        appdata_dir = self.user_data_path
         profiles_dir = os.path.join(appdata_dir, "creator_profiles")
 
         if not os.path.isdir(profiles_dir):

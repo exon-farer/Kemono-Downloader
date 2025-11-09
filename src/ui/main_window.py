@@ -339,7 +339,7 @@ class DownloaderApp (QWidget ):
         self.download_location_label_widget = None
         self.remove_from_filename_label_widget = None
         self.skip_words_label_widget = None
-        self.setWindowTitle("Kemono Downloader v7.6.0")
+        self.setWindowTitle("Kemono Downloader v7.6.1")
         setup_ui(self)
         self._connect_signals()
         if hasattr(self, 'character_input'):
@@ -6617,7 +6617,7 @@ class DownloaderApp (QWidget ):
                                     self._tr("restore_pending_message_creator_selection",
                                              "Please 'Restore Download' or 'Discard Session' before selecting new creators."))
             return
-        dialog = EmptyPopupDialog(self.app_base_dir, self)
+        dialog = EmptyPopupDialog(self.user_data_path, self)
         if dialog.exec_() == QDialog.Accepted:
             # --- NEW BATCH UPDATE LOGIC ---
             if hasattr(dialog, 'update_profiles_list') and dialog.update_profiles_list:

@@ -107,5 +107,5 @@
 │       ├── network_utils.py
 │       ├── resolution.py
 │       └── text_utils.py
-├── structure.py
+├── structure.txt
 └── yt-dlp.exe

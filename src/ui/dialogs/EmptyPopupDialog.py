@@ -140,7 +140,7 @@ class EmptyPopupDialog (QDialog ):
     SCOPE_CREATORS ="Creators"
 
 
-    def __init__ (self ,app_base_dir ,parent_app_ref ,parent =None ):
+    def __init__ (self ,user_data_path ,parent_app_ref ,parent =None ):
         super ().__init__ (parent )
         self.parent_app = parent_app_ref
 
@@ -148,7 +148,7 @@ class EmptyPopupDialog (QDialog ):
         
         self.setMinimumSize(int(400 * scale_factor), int(300 * scale_factor))
         self.current_scope_mode = self.SCOPE_CREATORS
-        self .app_base_dir =app_base_dir 
+        self.user_data_path = user_data_path
 
         app_icon =get_app_icon_object ()
         if app_icon and not app_icon .isNull ():
@@ -336,7 +336,7 @@ class EmptyPopupDialog (QDialog ):
         """
         # --- NEW BEHAVIOR ---
         # Pass the app_base_dir and a reference to the main app (for translations/theme)
-        dialog = UpdateCheckDialog(self.app_base_dir, self.parent_app, self)
+        dialog = UpdateCheckDialog(self.user_data_path, self.parent_app, self)
         
         if dialog.exec_() == QDialog.Accepted:
             # --- MODIFIED: Get a list of profiles now ---
