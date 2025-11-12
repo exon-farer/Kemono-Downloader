@@ -134,7 +134,9 @@ class SimpCityDownloadThread(QThread):
                 with self.counter_lock: self.total_skip_count += 1
                 return
             self.progress_signal.emit(f"   -> Downloading (Image): '{filename}'...")
-            response = session.get(job['url'], stream=True, timeout=90, headers={'Referer': self.start_url})
+            # --- START MODIFICATION ---
+            response = session.get(job['url'], stream=True, timeout=180, headers={'Referer': self.start_url})
+            # --- END MODIFICATION ---
             response.raise_for_status()
             with open(filepath, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
@@ -227,7 +229,9 @@ class SimpCityDownloadThread(QThread):
                 else:
                     self.progress_signal.emit(f"       -> Downloading: '{filename}'...")
                     headers = file_data.get('headers', {'Referer': source_url})
-                    response = session.get(file_data.get('url'), stream=True, timeout=90, headers=headers)
+                    # --- START MODIFICATION ---
+                    response = session.get(file_data.get('url'), stream=True, timeout=180, headers=headers)
+                    # --- END MODIFICATION ---
                     response.raise_for_status()
                     with open(filepath, 'wb') as f:
                         for chunk in response.iter_content(chunk_size=8192):
@@ -298,16 +302,30 @@ class SimpCityDownloadThread(QThread):
                         try:
                             page_title, jobs_on_page, final_url = fetch_single_simpcity_page(page_url, self._log_interceptor, cookies=self.cookies)
                             
+                            # --- START: MODIFIED REDIRECT LOGIC ---
                             if final_url != page_url:
                                 self.progress_signal.emit(f"   -> Redirect detected from {page_url} to {final_url}")
                                 try:
                                     req_page_match = re.search(r'/page-(\d+)', page_url)
                                     final_page_match = re.search(r'/page-(\d+)', final_url)
-                                    if req_page_match and final_page_match and int(final_page_match.group(1)) < int(req_page_match.group(1)):
-                                        self.progress_signal.emit("   -> Redirected to an earlier page. Reached end of thread.")
-                                        end_of_thread = True
+
+                                    if req_page_match:
+                                        req_page_num = int(req_page_match.group(1))
+
+                                        # Scenario 1: Redirect to an earlier page (e.g., page-11 -> page-10)
+                                        if final_page_match and int(final_page_match.group(1)) < req_page_num:
+                                            self.progress_signal.emit(f"   -> Redirected to an earlier page ({final_page_match.group(0)}). Reached end of thread.")
+                                            end_of_thread = True
+                                        
+                                        # Scenario 2: Redirect to base URL (e.g., page-11 -> /)
+                                        # We check req_page_num > 1 because page-1 often redirects to base URL, which is normal.
+                                        elif not final_page_match and req_page_num > 1:
+                                            self.progress_signal.emit(f"   -> Redirected to base thread URL. Reached end of thread.")
+                                            end_of_thread = True
+
                                 except (ValueError, TypeError):
-                                    pass
+                                    pass # Ignore parsing errors
+                            # --- END: MODIFIED REDIRECT LOGIC ---
                             
                             if end_of_thread:
                                 page_fetch_successful = True; break
@@ -316,25 +334,40 @@ class SimpCityDownloadThread(QThread):
                                 self.progress_signal.emit(f"   -> Page {page_counter} is invalid or has no title. Reached end of thread.")
                                 end_of_thread = True
                             elif not jobs_on_page: 
+                                self.progress_signal.emit(f"   -> Page {page_counter} has no content. Reached end of thread.")
                                 end_of_thread = True
                             else:
                                 new_jobs = [job for job in jobs_on_page if job.get('url') not in self.processed_job_urls]
                                 if not new_jobs and page_counter > 1: 
+                                    self.progress_signal.emit(f"   -> Page {page_counter} contains no new content. Reached end of thread.")
                                     end_of_thread = True
                                 else:
                                     enriched_jobs = self._get_enriched_jobs(new_jobs)
-                                    for job in enriched_jobs:
-                                        self.processed_job_urls.add(job.get('url'))
-                                        if job['type'] == 'image': self.image_queue.put(job)
-                                        else: self.service_queue.put(job)
+                                    if not enriched_jobs and not new_jobs:
+                                        # This can happen if all new_jobs were e.g. pixeldrain and it's disabled
+                                        self.progress_signal.emit(f"   -> Page {page_counter} content was filtered out. Reached end of thread.")
+                                        end_of_thread = True
+                                    else:
+                                        for job in enriched_jobs:
+                                            self.processed_job_urls.add(job.get('url'))
+                                            if job['type'] == 'image': self.image_queue.put(job)
+                                            else: self.service_queue.put(job)
                             page_fetch_successful = True; break
                         except requests.exceptions.HTTPError as e:
-                            if e.response.status_code in [403, 404]: end_of_thread = True; break
-                            elif e.response.status_code == 429: time.sleep(5 * (retries + 2)); retries += 1
-                            else: end_of_thread = True; break
+                            if e.response.status_code in [403, 404]: 
+                                self.progress_signal.emit(f"   -> Page {page_counter} returned {e.response.status_code}. Reached end of thread.")
+                                end_of_thread = True; break
+                            elif e.response.status_code == 429: 
+                                self.progress_signal.emit(f"   -> Rate limited (429). Waiting...")
+                                time.sleep(5 * (retries + 2)); retries += 1
+                            else: 
+                                self.progress_signal.emit(f"   -> HTTP Error {e.response.status_code} on page {page_counter}. Stopping crawl.")
+                                end_of_thread = True; break
                         except Exception as e:
                             self.progress_signal.emit(f"   Stopping crawl due to error on page {page_counter}: {e}"); end_of_thread = True; break
-                    if not page_fetch_successful and not end_of_thread: end_of_thread = True
+                    if not page_fetch_successful and not end_of_thread: 
+                        self.progress_signal.emit(f"   -> Failed to fetch page {page_counter} after {MAX_RETRIES} attempts. Stopping crawl.")
+                        end_of_thread = True
                     if not end_of_thread: page_counter += 1
         except Exception as e:
             self.progress_signal.emit(f"❌ A critical error occurred during the main fetch phase: {e}")

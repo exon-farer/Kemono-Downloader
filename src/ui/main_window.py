@@ -3888,30 +3888,6 @@ class DownloaderApp (QWidget ):
                 num_threads_from_gui = MAX_THREADS
                 self.thread_count_input.setText(str(MAX_THREADS))
                 self.log_signal.emit(f"⚠️ User attempted {num_threads_from_gui} threads, capped to {MAX_THREADS}.")
-            if SOFT_WARNING_THREAD_THRESHOLD < num_threads_from_gui <= MAX_THREADS:
-                soft_warning_msg_box = QMessageBox(self)
-                soft_warning_msg_box.setIcon(QMessageBox.Question)
-                soft_warning_msg_box.setWindowTitle("Thread Count Advisory")
-                soft_warning_msg_box.setText(
-                    f"You've set the thread count to {num_threads_from_gui}.\n\n"
-                    "While this is within the allowed limit, using a high number of threads (typically above 40-50) can sometimes lead to:\n"
-                    "  - Increased errors or failed file downloads.\n"
-                    "  - Connection issues with the server.\n"
-                    "  - Higher system resource usage.\n\n"
-                    "For most users and connections, 10-30 threads provide a good balance.\n\n"
-                    f"Do you want to proceed with {num_threads_from_gui} threads, or would you like to change the value?"
-                )
-                proceed_button = soft_warning_msg_box.addButton("Proceed Anyway", QMessageBox.AcceptRole)
-                change_button = soft_warning_msg_box.addButton("Change Thread Value", QMessageBox.RejectRole)
-                soft_warning_msg_box.setDefaultButton(proceed_button)
-                soft_warning_msg_box.setEscapeButton(change_button)
-                soft_warning_msg_box.exec_()
-
-                if soft_warning_msg_box.clickedButton() == change_button:
-                    self.log_signal.emit(f"ℹ️ User opted to change thread count from {num_threads_from_gui} after advisory.")
-                    self.thread_count_input.setFocus()
-                    self.thread_count_input.selectAll()
-                    return False
 
         raw_skip_words_text = self.skip_words_input.text().strip()
         skip_words_parts = [part.strip() for part in raw_skip_words_text.split(',') if part.strip()]
@@ -4018,26 +3994,6 @@ class DownloaderApp (QWidget ):
                 if end_page is not None and end_page <= 0: raise ValueError("End page must be positive.")
                 if start_page and end_page and start_page > end_page: raise ValueError("Start page cannot be greater than end page.")
 
-                if manga_mode and start_page and end_page:
-                    msg_box = QMessageBox(self)
-                    msg_box.setIcon(QMessageBox.Warning)
-                    msg_box.setWindowTitle("Renaming Mode & Page Range Warning")
-                    msg_box.setText(
-                    "You have enabled <b>Renaming Mode</b> with a sequential naming style (<b>Date Based</b> or <b>Title + G.Num</b>) and also specified a <b>Page Range</b>.\n\n"
-                    "These modes rely on processing all posts from the beginning to create a correct sequence. "
-                    "Using a page range may result in an incomplete or incorrectly ordered download.\n\n"
-                    "It is recommended to use these styles without a page range.\n\n"
-                    "Do you want to proceed anyway?"
-                    )
-                    proceed_button = msg_box.addButton("Proceed Anyway", QMessageBox.AcceptRole)
-                    cancel_button = msg_box.addButton("Cancel Download", QMessageBox.RejectRole)
-                    msg_box.setDefaultButton(proceed_button)
-                    msg_box.setEscapeButton(cancel_button)
-                    msg_box.exec_()
-
-                    if msg_box.clickedButton() == cancel_button:
-                        self.log_signal.emit("❌ Download cancelled by user due to Renaming Mode & Page Range warning.")
-                        return False
             except ValueError as e:
                 QMessageBox.critical(self, "Page Range Error", f"Invalid page range: {e}")
                 return False
@@ -6818,26 +6774,6 @@ class DownloaderApp (QWidget ):
             manga_mode_is_checked = self.manga_mode_checkbox.isChecked() if self.manga_mode_checkbox else False
             char_filter_is_empty = not self.character_input.text().strip()
             extract_links_only = (self.radio_only_links and self.radio_only_links.isChecked())
-
-            if manga_mode_is_checked and char_filter_is_empty and not extract_links_only:
-                msg_box = QMessageBox(self)
-                msg_box.setIcon(QMessageBox.Warning)
-                msg_box.setWindowTitle("Renaming Mode Filter Warning")
-                msg_box.setText(
-                    "Renaming Mode is enabled, but 'Filter by Character(s)' is empty.\n\n"
-                    "This is a one-time warning for this entire batch of downloads.\n\n"
-                    "Proceeding without a filter may result in generic filenames and folders.\n\n"
-                    "Proceed with the entire batch?"
-                )
-                proceed_button = msg_box.addButton("Proceed Anyway", QMessageBox.AcceptRole)
-                cancel_button = msg_box.addButton("Cancel Entire Batch", QMessageBox.RejectRole)
-                msg_box.exec_()
-                if msg_box.clickedButton() == cancel_button:
-                    self.log_signal.emit("❌ Entire favorite queue cancelled by user at Renaming Mode warning.")
-                    self.favorite_download_queue.clear()
-                    self.is_processing_favorites_queue = False
-                    self.set_ui_enabled(True)
-                    return # Stop processing the queue
 
         if self ._is_download_active ():
             self .log_signal .emit ("ℹ️ Waiting for current download to finish before starting next favorite.")
