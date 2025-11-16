@@ -339,7 +339,7 @@ class DownloaderApp (QWidget ):
         self.download_location_label_widget = None
         self.remove_from_filename_label_widget = None
         self.skip_words_label_widget = None
-        self.setWindowTitle("Kemono Downloader v7.6.1")
+        self.setWindowTitle("Kemono Downloader v6.7.0")
         setup_ui(self)
         self._connect_signals()
         if hasattr(self, 'character_input'):
@@ -3263,8 +3263,7 @@ class DownloaderApp (QWidget ):
         if self.favorite_download_queue and all(item.get('type') == 'single_post_from_popup' for item in self.favorite_download_queue):
             is_single_post = True
 
-        # --- MODIFIED: Added check for is_discord_url ---
-        can_enable_manga_checkbox = ((is_creator_feed or is_single_post) or is_favorite_mode_on) and not is_discord_url        
+        can_enable_manga_checkbox = (is_favorite_mode_on or not is_discord_url)        
         if self .manga_mode_checkbox :
             self .manga_mode_checkbox .setEnabled (can_enable_manga_checkbox)
             if not can_enable_manga_checkbox and self .manga_mode_checkbox .isChecked ():
@@ -5561,6 +5560,8 @@ class DownloaderApp (QWidget ):
                     self.download_thread.deleteLater()
                 self.download_thread = None # This is the crucial line    
                 self.is_finishing = False 
+
+                self.finish_lock.release()
                 self._process_next_favorite_download()
                 return  
 

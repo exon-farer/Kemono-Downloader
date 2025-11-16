@@ -145,7 +145,9 @@ def download_and_decrypt_mega_file(info, download_path, logger_func, progress_ca
         logger_func(f"   [Mega] Download for '{file_name}' cancelled before starting.")
         return
 
-    if file_size < MIN_SIZE_FOR_MULTIPART_MEGA:
+
+    # i tried to make the mega download multipart for big file but it didnt work you can try if you can fix this to make it multipart replace "if true" with this "if file_size < MIN_SIZE_FOR_MULTIPART_MEGA:" to activate multipart
+    if True:
         logger_func(f"   [Mega] Downloading '{file_name}' (Single Stream)...")
         try:
             cipher = AES.new(key, AES.MODE_CTR, nonce=nonce, initial_value=0)

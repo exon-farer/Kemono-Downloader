@@ -7,7 +7,8 @@ import sys
 from PyQt5.QtCore import Qt, QStandardPaths, QTimer
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
-    QGroupBox, QComboBox, QMessageBox, QGridLayout, QCheckBox, QLineEdit
+    QGroupBox, QComboBox, QMessageBox, QGridLayout, QCheckBox, QLineEdit,
+    QTabWidget, QWidget, QFileDialog  # Added QFileDialog
 )
 # --- Local Application Imports ---
 from ...i18n.translator import get_translation
@@ -111,7 +112,7 @@ class CountdownMessageBox(QDialog):
 class FutureSettingsDialog(QDialog):
     """
     A dialog for managing application-wide settings like theme, language,
-    and display options, with an organized layout.
+    and display options, using a tabbed layout.
     """
     def __init__(self, parent_app_ref, parent=None):
         super().__init__(parent)
@@ -124,8 +125,9 @@ class FutureSettingsDialog(QDialog):
             self.setWindowIcon(app_icon)
 
         screen_height = QApplication.primaryScreen().availableGeometry().height() if QApplication.primaryScreen() else 800
-        scale_factor = screen_height / 800.0
-        base_min_w, base_min_h = 420, 520 # Increased height for new options
+        # Use a more balanced aspect ratio
+        scale_factor = screen_height / 1000.0 
+        base_min_w, base_min_h = 480, 420 # Wider, less tall
         scaled_min_w = int(base_min_w * scale_factor)
         scaled_min_h = int(base_min_h * scale_factor)
         self.setMinimumSize(scaled_min_w, scaled_min_h)
@@ -137,67 +139,105 @@ class FutureSettingsDialog(QDialog):
     def _init_ui(self):
         """Initializes all UI components and layouts for the dialog."""
         main_layout = QVBoxLayout(self)
+        
+        # --- Create Tab Widget ---
+        self.tab_widget = QTabWidget()
+        main_layout.addWidget(self.tab_widget)
 
-        self.interface_group_box = QGroupBox()
-        interface_layout = QGridLayout(self.interface_group_box)
+        # --- Create Tabs ---
+        self.display_tab = QWidget()
+        self.downloads_tab = QWidget()
+        self.updates_tab = QWidget()
+
+        # Add tabs to the widget
+        self.tab_widget.addTab(self.display_tab, "Display")
+        self.tab_widget.addTab(self.downloads_tab, "Downloads")
+        self.tab_widget.addTab(self.updates_tab, "Updates")
+
+        # --- Populate Display Tab ---
+        display_tab_layout = QVBoxLayout(self.display_tab)
+        self.display_group_box = QGroupBox()
+        display_layout = QGridLayout(self.display_group_box)
 
         self.theme_label = QLabel()
         self.theme_toggle_button = QPushButton()
         self.theme_toggle_button.clicked.connect(self._toggle_theme)
-        interface_layout.addWidget(self.theme_label, 0, 0)
-        interface_layout.addWidget(self.theme_toggle_button, 0, 1)
+        display_layout.addWidget(self.theme_label, 0, 0)
+        display_layout.addWidget(self.theme_toggle_button, 0, 1)
 
         self.ui_scale_label = QLabel()
         self.ui_scale_combo_box = QComboBox()
         self.ui_scale_combo_box.currentIndexChanged.connect(self._display_setting_changed)
-        interface_layout.addWidget(self.ui_scale_label, 1, 0)
-        interface_layout.addWidget(self.ui_scale_combo_box, 1, 1)
+        display_layout.addWidget(self.ui_scale_label, 1, 0)
+        display_layout.addWidget(self.ui_scale_combo_box, 1, 1)
 
         self.language_label = QLabel()
         self.language_combo_box = QComboBox()
         self.language_combo_box.currentIndexChanged.connect(self._language_selection_changed)
-        interface_layout.addWidget(self.language_label, 2, 0)
-        interface_layout.addWidget(self.language_combo_box, 2, 1)
+        display_layout.addWidget(self.language_label, 2, 0)
+        display_layout.addWidget(self.language_combo_box, 2, 1)
 
-        main_layout.addWidget(self.interface_group_box)
-
-        self.download_window_group_box = QGroupBox()
-        download_window_layout = QGridLayout(self.download_window_group_box)
-        
         self.window_size_label = QLabel()
         self.resolution_combo_box = QComboBox()
         self.resolution_combo_box.currentIndexChanged.connect(self._display_setting_changed)
-        download_window_layout.addWidget(self.window_size_label, 0, 0)
-        download_window_layout.addWidget(self.resolution_combo_box, 0, 1)
+        display_layout.addWidget(self.window_size_label, 3, 0)
+        display_layout.addWidget(self.resolution_combo_box, 3, 1)
+        
+        display_tab_layout.addWidget(self.display_group_box)
+        display_tab_layout.addStretch(1) # Push content to the top
+
+        # --- Populate Downloads Tab ---
+        downloads_tab_layout = QVBoxLayout(self.downloads_tab)
+        self.download_settings_group_box = QGroupBox()
+        download_settings_layout = QGridLayout(self.download_settings_group_box)
 
         self.default_path_label = QLabel()
         self.save_path_button = QPushButton()
         self.save_path_button.clicked.connect(self._save_settings)
-        download_window_layout.addWidget(self.default_path_label, 1, 0)
-        download_window_layout.addWidget(self.save_path_button, 1, 1)
-
-        self.date_prefix_format_label = QLabel()
-        self.date_prefix_format_input = QLineEdit()
-        self.date_prefix_format_input.textChanged.connect(self._date_prefix_format_changed)
-        download_window_layout.addWidget(self.date_prefix_format_label, 2, 0)
-        download_window_layout.addWidget(self.date_prefix_format_input, 2, 1)
+        download_settings_layout.addWidget(self.default_path_label, 0, 0)
+        download_settings_layout.addWidget(self.save_path_button, 0, 1)
 
         self.post_download_action_label = QLabel()
         self.post_download_action_combo = QComboBox()
         self.post_download_action_combo.currentIndexChanged.connect(self._post_download_action_changed)
-        download_window_layout.addWidget(self.post_download_action_label, 3, 0)
-        download_window_layout.addWidget(self.post_download_action_combo, 3, 1)
+        download_settings_layout.addWidget(self.post_download_action_label, 1, 0)
+        download_settings_layout.addWidget(self.post_download_action_combo, 1, 1)
+
+        self.date_prefix_format_label = QLabel()
+        self.date_prefix_format_input = QLineEdit()
+        self.date_prefix_format_input.textChanged.connect(self._date_prefix_format_changed)
+        download_settings_layout.addWidget(self.date_prefix_format_label, 2, 0)
+        download_settings_layout.addWidget(self.date_prefix_format_input, 2, 1)
 
         self.save_creator_json_checkbox = QCheckBox()
         self.save_creator_json_checkbox.stateChanged.connect(self._creator_json_setting_changed)
-        download_window_layout.addWidget(self.save_creator_json_checkbox, 4, 0, 1, 2)
+        download_settings_layout.addWidget(self.save_creator_json_checkbox, 3, 0, 1, 2)
         
         self.fetch_first_checkbox = QCheckBox()
         self.fetch_first_checkbox.stateChanged.connect(self._fetch_first_setting_changed)
-        download_window_layout.addWidget(self.fetch_first_checkbox, 5, 0, 1, 2)
+        download_settings_layout.addWidget(self.fetch_first_checkbox, 4, 0, 1, 2)
 
-        main_layout.addWidget(self.download_window_group_box)
+        # --- START: Add new Load/Save buttons ---
+        settings_file_layout = QHBoxLayout()
+        self.load_settings_button = QPushButton()
+        self.save_settings_button = QPushButton()
+        settings_file_layout.addWidget(self.load_settings_button)
+        settings_file_layout.addWidget(self.save_settings_button)
+        settings_file_layout.addStretch(1)
+        
+        # Add this new layout to the grid
+        download_settings_layout.addLayout(settings_file_layout, 5, 0, 1, 2) # Row 5, span 2 cols
+        
+        # Connect signals
+        self.load_settings_button.clicked.connect(self._handle_load_settings)
+        self.save_settings_button.clicked.connect(self._handle_save_settings)
+        # --- END: Add new Load/Save buttons ---
 
+        downloads_tab_layout.addWidget(self.download_settings_group_box)
+        downloads_tab_layout.addStretch(1) # Push content to the top
+
+        # --- Populate Updates Tab ---
+        updates_tab_layout = QVBoxLayout(self.updates_tab)
         self.update_group_box = QGroupBox()
         update_layout = QGridLayout(self.update_group_box)
         self.version_label = QLabel()
@@ -207,29 +247,39 @@ class FutureSettingsDialog(QDialog):
         update_layout.addWidget(self.version_label, 0, 0)
         update_layout.addWidget(self.update_status_label, 0, 1)
         update_layout.addWidget(self.check_update_button, 1, 0, 1, 2)
-        main_layout.addWidget(self.update_group_box)
+        
+        updates_tab_layout.addWidget(self.update_group_box)
+        updates_tab_layout.addStretch(1) # Push content to the top
 
-        main_layout.addStretch(1)
-
+        # --- OK Button (outside tabs) ---
+        button_layout = QHBoxLayout()
+        button_layout.addStretch(1)
         self.ok_button = QPushButton()
         self.ok_button.clicked.connect(self.accept)
-        main_layout.addWidget(self.ok_button, 0, Qt.AlignRight | Qt.AlignBottom)
+        button_layout.addWidget(self.ok_button)
+        main_layout.addLayout(button_layout)
+
 
     def _retranslate_ui(self):
         self.setWindowTitle(self._tr("settings_dialog_title", "Settings"))
-        self.interface_group_box.setTitle(self._tr("interface_group_title", "Interface Settings"))
-        self.download_window_group_box.setTitle(self._tr("download_window_group_title", "Download & Window Settings"))
+        
+        # --- Tab Titles ---
+        self.tab_widget.setTabText(0, self._tr("settings_tab_display", "Display"))
+        self.tab_widget.setTabText(1, self._tr("settings_tab_downloads", "Downloads"))
+        self.tab_widget.setTabText(2, self._tr("settings_tab_updates", "Updates"))
+
+        # --- Display Tab ---
+        self.display_group_box.setTitle(self._tr("display_settings_group_title", "Display Settings"))
         self.theme_label.setText(self._tr("theme_label", "Theme:"))
         self.ui_scale_label.setText(self._tr("ui_scale_label", "UI Scale:"))
         self.language_label.setText(self._tr("language_label", "Language:"))
-
         self.window_size_label.setText(self._tr("window_size_label", "Window Size:"))
-        self.default_path_label.setText(self._tr("default_path_label", "Default Path:"))
 
+        # --- Downloads Tab ---
+        self.download_settings_group_box.setTitle(self._tr("download_settings_group_title", "Download Settings"))
+        self.default_path_label.setText(self._tr("default_path_label", "Default Path:"))
         self.date_prefix_format_label.setText(self._tr("date_prefix_format_label", "Post Subfolder Format:"))
-        # Update placeholder to include {post}
         self.date_prefix_format_input.setPlaceholderText(self._tr("date_prefix_format_placeholder", "e.g., YYYY-MM-DD {post} {postid}"))
-        # Add the tooltip to explain usage
         self.date_prefix_format_input.setToolTip(self._tr(
             "date_prefix_format_tooltip", 
             "Create a custom folder name using placeholders:\n"
@@ -238,25 +288,32 @@ class FutureSettingsDialog(QDialog):
             "• {postid}: for the post's unique ID\n\n"
             "Example: {post} [{postid}] [YYYY-MM-DD]"
         ))
-
-        
-        self.post_download_action_label.setText(self._tr("post_download_action_label", "Action After Download:"))
-
         self.post_download_action_label.setText(self._tr("post_download_action_label", "Action After Download:"))
         self.save_creator_json_checkbox.setText(self._tr("save_creator_json_label", "Save Creator.json file"))
         self.fetch_first_checkbox.setText(self._tr("fetch_first_label", "Fetch First (Download after all pages are found)"))
         self.fetch_first_checkbox.setToolTip(self._tr("fetch_first_tooltip", "If checked, the downloader will find all posts from a creator first before starting any downloads.\nThis can be slower to start but provides a more accurate progress bar."))
-        self._update_theme_toggle_button_text()
         self.save_path_button.setText(self._tr("settings_save_all_button", "Save Path + Cookie + Token"))
         self.save_path_button.setToolTip(self._tr("settings_save_all_tooltip", "Save the current 'Download Location', Cookie, and Discord Token settings for future sessions."))
-        self.ok_button.setText(self._tr("ok_button", "OK"))
-
+        
+        # --- START: Add new button text ---
+        self.load_settings_button.setText(self._tr("load_settings_button", "Load Settings..."))
+        self.load_settings_button.setToolTip(self._tr("load_settings_tooltip", "Load all download settings from a .json file."))
+        self.save_settings_button.setText(self._tr("save_settings_button", "Save Settings..."))
+        self.save_settings_button.setToolTip(self._tr("save_settings_tooltip", "Save all current download settings to a .json file."))
+        # --- END: Add new button text ---
+        
+        # --- Updates Tab ---
         self.update_group_box.setTitle(self._tr("update_group_title", "Application Updates"))
         current_version = self.parent_app.windowTitle().split(' v')[-1]
         self.version_label.setText(self._tr("current_version_label", f"Current Version: v{current_version}"))
         self.update_status_label.setText(self._tr("update_status_ready", "Ready to check."))
         self.check_update_button.setText(self._tr("check_for_updates_button", "Check for Updates"))
+
+        # --- General ---
+        self._update_theme_toggle_button_text()
+        self.ok_button.setText(self._tr("ok_button", "OK"))
         
+        # --- Load Data ---
         self._populate_display_combo_boxes()
         self._populate_language_combo_box()
         self._populate_post_download_action_combo()
@@ -331,7 +388,38 @@ class FutureSettingsDialog(QDialog):
     def _apply_theme(self):
         if self.parent_app and self.parent_app.current_theme == "dark":
             scale = getattr(self.parent_app, 'scale_factor', 1)
-            self.setStyleSheet(get_dark_theme(scale))
+            base_stylesheet = get_dark_theme(scale)
+            
+            # --- START: Tab Styling Fix ---
+            tab_stylesheet = """
+                QTabWidget::pane {
+                    border-top: 1px solid #444;
+                    margin-top: -1px; /* Overlap with tab bar */
+                    background-color: #2D2D2D;
+                }
+                QTabBar::tab {
+                    background-color: #3D3D3D;
+                    color: #BBBBBB;
+                    border: 1px solid #444;
+                    border-bottom: none; /* No bottom border for tabs */
+                    padding: 6px 12px;
+                    margin-right: 2px;
+                    border-top-left-radius: 4px;
+                    border-top-right-radius: 4px;
+                }
+                QTabBar::tab:selected {
+                    background-color: #2D2D2D; /* Same as pane background */
+                    color: #EEEEEE;
+                    border-bottom: 1px solid #2D2D2D; /* Hides the pane top border */
+                    margin-bottom: -1px; /* Pulls tab down to cover pane border */
+                }
+                QTabBar::tab:!selected:hover {
+                    background-color: #4A4A4A;
+                }
+            """
+            # --- END: Tab Styling Fix ---
+            
+            self.setStyleSheet(base_stylesheet + tab_stylesheet)
         else:
             self.setStyleSheet("")
 
@@ -491,3 +579,97 @@ class FutureSettingsDialog(QDialog):
             QMessageBox.information(self, "Settings Saved", "Settings have been saved successfully.")
         else:
             QMessageBox.warning(self, "Nothing to Save", "No valid settings were found to save.")
+
+    # --- START: New functions for Save/Load ---
+    def _get_settings_dir(self):
+        """Helper to get a consistent directory for saving/loading profiles."""
+        if hasattr(self.parent_app, 'user_data_path'):
+            # We use 'user_data_path' which should point to 'appdata'
+            settings_dir = os.path.join(self.parent_app.user_data_path, "settings_profiles")
+            os.makedirs(settings_dir, exist_ok=True)
+            return settings_dir
+        # Fallback if user_data_path isn't available
+        return QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+
+    def _handle_save_settings(self):
+        """
+        Calls the main app to get all settings, then saves them to a user-chosen JSON file.
+        """
+        if not hasattr(self.parent_app, '_get_current_ui_settings_as_dict'):
+            QMessageBox.critical(self, self._tr("generic_error_title", "Error"),
+                                 self._tr("settings_missing_save_func_error", "Parent application is missing the required save function."))
+            return
+
+        settings_dir = self._get_settings_dir()
+        filepath, _ = QFileDialog.getSaveFileName(
+            self,
+            self._tr("save_settings_dialog_title", "Save Settings Profile"),
+            settings_dir,
+            self._tr("json_files_filter", "JSON Files (*.json)")
+        )
+        
+        if filepath:
+            if not filepath.endswith('.json'):
+                filepath += '.json'
+            
+            try:
+                # Get all settings from the main window
+                settings_data = self.parent_app._get_current_ui_settings_as_dict()
+                
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    json.dump(settings_data, f, indent=2)
+                
+                QMessageBox.information(self, 
+                    self._tr("save_settings_success_title", "Settings Saved"),
+                    self._tr("save_settings_success_msg", "Settings successfully saved to:\n{filename}")
+                    .format(filename=os.path.basename(filepath)))
+            except Exception as e:
+                QMessageBox.critical(self,
+                    self._tr("save_settings_error_title", "Error Saving Settings"),
+                    str(e))
+
+    def _handle_load_settings(self):
+        """
+        Lets the user pick a JSON file, loads it, and applies the settings to the main app.
+        """
+        if not hasattr(self.parent_app, '_load_ui_from_settings_dict') or \
+           not hasattr(self.parent_app, '_update_all_ui_states'):
+            QMessageBox.critical(self, self._tr("generic_error_title", "Error"),
+                                 self._tr("settings_missing_load_func_error", "Parent application is missing the required load functions."))
+            return
+
+        settings_dir = self._get_settings_dir()
+        filepath, _ = QFileDialog.getOpenFileName(
+            self,
+            self._tr("load_settings_dialog_title", "Load Settings Profile"),
+            settings_dir,
+            self._tr("json_files_filter", "JSON Files (*.json)")
+        )
+        
+        if filepath:
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    settings_data = json.load(f)
+                
+                if not isinstance(settings_data, dict):
+                    raise ValueError(self._tr("settings_invalid_json_error", "File is not a valid settings dictionary."))
+                
+                # Apply all settings to the main window
+                self.parent_app._load_ui_from_settings_dict(settings_data)
+                
+                # Refresh the main window UI to show changes
+                self.parent_app._update_all_ui_states()
+                
+                QMessageBox.information(self,
+                    self._tr("load_settings_success_title", "Settings Loaded"),
+                    self._tr("load_settings_success_msg", "Successfully loaded settings from:\n{filename}")
+                    .format(filename=os.path.basename(filepath)))
+                
+                # Close the settings dialog after loading
+                self.accept()
+                
+            except Exception as e:
+                QMessageBox.critical(self,
+                    self._tr("load_settings_error_title", "Error Loading Settings"),
+                    str(e))
+    # --- END: New functions for Save/Load ---
