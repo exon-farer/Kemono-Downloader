@@ -24,7 +24,7 @@ from .rule34video_downloader_thread import Rule34VideoDownloadThread
 from .saint2_downloader_thread import Saint2DownloadThread
 from .simp_city_downloader_thread import SimpCityDownloadThread
 from .toonily_downloader_thread import ToonilyDownloadThread
-
+from .deviantart_downloader_thread import DeviantArtDownloadThread
 
 def create_downloader_thread(main_app, api_url, service, id1, id2, effective_output_dir_for_run):
     """
@@ -175,6 +175,17 @@ def create_downloader_thread(main_app, api_url, service, id1, id2, effective_out
          # id1 contains the full URL or album ID from extract_post_info
         return BunkrDownloadThread(id1, effective_output_dir_for_run, main_app)
 
+    # Handler for DeviantArt
+    if service == 'deviantart':
+        main_app.log_signal.emit(f"ℹ️ DeviantArt URL detected. Starting dedicated downloader.")
+        return DeviantArtDownloadThread(
+            url=api_url,
+            output_dir=effective_output_dir_for_run,
+            pause_event=main_app.pause_event,
+            cancellation_event=main_app.cancellation_event,
+            parent=main_app
+        )
+    # ----------------------
     # --- Fallback ---
     # If no specific handler matched based on service name or URL pattern, return None.
     # This signals main_window.py to use the generic BackendDownloadThread/PostProcessorWorker

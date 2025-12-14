@@ -254,6 +254,7 @@ class SimpCityDownloadThread(QThread):
         self.should_dl_pixeldrain = self.parent_app.simpcity_dl_pixeldrain_cb.isChecked()
         self.should_dl_saint2 = self.parent_app.simpcity_dl_saint2_cb.isChecked()
         self.should_dl_mega = self.parent_app.simpcity_dl_mega_cb.isChecked()
+        self.should_dl_images = self.parent_app.simpcity_dl_images_cb.isChecked()
         self.should_dl_bunkr = self.parent_app.simpcity_dl_bunkr_cb.isChecked()
         self.should_dl_gofile = self.parent_app.simpcity_dl_gofile_cb.isChecked()
         
@@ -288,8 +289,10 @@ class SimpCityDownloadThread(QThread):
                 enriched_jobs = self._get_enriched_jobs(jobs)
                 if enriched_jobs:
                     for job in enriched_jobs:
-                        if job['type'] == 'image': self.image_queue.put(job)
-                        else: self.service_queue.put(job)
+                        if job['type'] == 'image': 
+                            if self.should_dl_images: self.image_queue.put(job)
+                        else: self.service_queue.put(job)         
+         
             else:
                 base_url = re.sub(r'(/page-\d+)|(/post-\d+)', '', self.start_url).split('#')[0].strip('/')
                 page_counter = 1; end_of_thread = False; MAX_RETRIES = 3
@@ -347,11 +350,14 @@ class SimpCityDownloadThread(QThread):
                                         # This can happen if all new_jobs were e.g. pixeldrain and it's disabled
                                         self.progress_signal.emit(f"   -> Page {page_counter} content was filtered out. Reached end of thread.")
                                         end_of_thread = True
+
                                     else:
                                         for job in enriched_jobs:
                                             self.processed_job_urls.add(job.get('url'))
-                                            if job['type'] == 'image': self.image_queue.put(job)
+                                            if job['type'] == 'image':
+                                                if self.should_dl_images: self.image_queue.put(job)
                                             else: self.service_queue.put(job)
+
                             page_fetch_successful = True; break
                         except requests.exceptions.HTTPError as e:
                             if e.response.status_code in [403, 404]: 

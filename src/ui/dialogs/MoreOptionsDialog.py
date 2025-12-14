@@ -11,17 +11,16 @@ class MoreOptionsDialog(QDialog):
     SCOPE_CONTENT = "content"
     SCOPE_COMMENTS = "comments"
 
-    def __init__(self, parent=None, current_scope=None, current_format=None, single_pdf_checked=False):
+    def __init__(self, parent=None, current_scope=None, current_format=None, single_pdf_checked=False, add_info_checked=False):
         super().__init__(parent)
         self.parent_app = parent
         self.setWindowTitle("More Options")
         self.setMinimumWidth(350)
 
-        # ... (Layout and other widgets remain the same) ...
-
         layout = QVBoxLayout(self)
         self.description_label = QLabel("Please choose the scope for the action:")
         layout.addWidget(self.description_label)
+        
         self.radio_button_group = QButtonGroup(self)
         self.radio_content = QRadioButton("Description/Content")
         self.radio_comments = QRadioButton("Comments")
@@ -50,14 +49,20 @@ class MoreOptionsDialog(QDialog):
         export_layout.addStretch()
         layout.addLayout(export_layout)
 
-        # --- UPDATED: Single PDF Checkbox ---
+        # --- Single PDF Checkbox ---
         self.single_pdf_checkbox = QCheckBox("Single PDF")
         self.single_pdf_checkbox.setToolTip("If checked, all text from matching posts will be compiled into one single PDF file.")
         self.single_pdf_checkbox.setChecked(single_pdf_checked)
         layout.addWidget(self.single_pdf_checkbox)
 
-        self.format_combo.currentTextChanged.connect(self.update_single_pdf_checkbox_state)
-        self.update_single_pdf_checkbox_state(self.format_combo.currentText())
+        # --- NEW: Add Info Checkbox ---
+        self.add_info_checkbox = QCheckBox("Add info in PDF")
+        self.add_info_checkbox.setToolTip("If checked, adds a first page with post details (Title, Date, Link, Creator, Tags, etc.).")
+        self.add_info_checkbox.setChecked(add_info_checked)
+        layout.addWidget(self.add_info_checkbox)
+
+        self.format_combo.currentTextChanged.connect(self.update_checkbox_states)
+        self.update_checkbox_states(self.format_combo.currentText())
 
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.button_box.accepted.connect(self.accept)
@@ -65,12 +70,18 @@ class MoreOptionsDialog(QDialog):
         layout.addWidget(self.button_box)
         self.setLayout(layout)
         self._apply_theme()
-    def update_single_pdf_checkbox_state(self, text):
-        """Enable the Single PDF checkbox only if the format is PDF."""
+
+    def update_checkbox_states(self, text):
+        """Enable PDF-specific checkboxes only if the format is PDF."""
         is_pdf = (text.upper() == "PDF")
         self.single_pdf_checkbox.setEnabled(is_pdf)
+        self.add_info_checkbox.setEnabled(is_pdf)
+        
         if not is_pdf:
             self.single_pdf_checkbox.setChecked(False)
+            # We don't uncheck add_info necessarily, just disable it, 
+            # but unchecking is safer visually to imply "won't happen"
+            self.add_info_checkbox.setChecked(False)
 
     def get_selected_scope(self):
         if self.radio_comments.isChecked():
@@ -84,13 +95,14 @@ class MoreOptionsDialog(QDialog):
         """Returns the state of the Single PDF checkbox."""
         return self.single_pdf_checkbox.isChecked() and self.single_pdf_checkbox.isEnabled()
 
+    def get_add_info_state(self):
+        """Returns the state of the Add Info checkbox."""
+        return self.add_info_checkbox.isChecked() and self.add_info_checkbox.isEnabled()
+
     def _apply_theme(self):
         """Applies the current theme from the parent application."""
-        if self.parent_app and self.parent_app.current_theme == "dark":
-            # Get the scale factor from the parent app
+        if self.parent_app and hasattr(self.parent_app, 'current_theme') and self.parent_app.current_theme == "dark":
             scale = getattr(self.parent_app, 'scale_factor', 1)
-            # Call the imported function with the correct scale
             self.setStyleSheet(get_dark_theme(scale))
         else:
-            # Explicitly set a blank stylesheet for light mode
             self.setStyleSheet("")

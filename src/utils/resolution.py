@@ -307,14 +307,18 @@ def setup_ui(main_app):
     simpcity_settings_label = QLabel("⚙️ SimpCity Download Options:")
     simpcity_settings_layout.addWidget(simpcity_settings_label)
     
-    # Checkbox row
+     # Checkbox row
     simpcity_checkboxes_layout = QHBoxLayout()
+    
+    main_app.simpcity_dl_images_cb = QCheckBox("Download Images")
+    main_app.simpcity_dl_images_cb.setChecked(True) # Checked by default    
     main_app.simpcity_dl_pixeldrain_cb = QCheckBox("Download Pixeldrain")
     main_app.simpcity_dl_saint2_cb = QCheckBox("Download Saint2.su")
     main_app.simpcity_dl_mega_cb = QCheckBox("Download Mega")
     main_app.simpcity_dl_bunkr_cb = QCheckBox("Download Bunkr")
     main_app.simpcity_dl_gofile_cb = QCheckBox("Download Gofile")
     
+    simpcity_checkboxes_layout.addWidget(main_app.simpcity_dl_images_cb)
     simpcity_checkboxes_layout.addWidget(main_app.simpcity_dl_pixeldrain_cb)
     simpcity_checkboxes_layout.addWidget(main_app.simpcity_dl_saint2_cb)
     simpcity_checkboxes_layout.addWidget(main_app.simpcity_dl_mega_cb)
@@ -324,7 +328,6 @@ def setup_ui(main_app):
     simpcity_settings_layout.addLayout(simpcity_checkboxes_layout)
     
     # --- START NEW CODE ---
-    # Create the second, dedicated set of cookie controls for SimpCity
     simpcity_cookie_layout = QHBoxLayout()
     simpcity_cookie_layout.setContentsMargins(0, 5, 0, 0) # Add some top margin
     simpcity_cookie_label = QLabel("Cookie:")

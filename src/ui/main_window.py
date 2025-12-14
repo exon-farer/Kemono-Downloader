@@ -163,7 +163,8 @@ class DownloaderApp (QWidget ):
         self.is_ready_to_download_batch_update = False
         self.is_finishing = False 
         self.finish_lock = threading.Lock() 
-
+        self.add_info_in_pdf_setting = False
+        
         saved_res = self.settings.value(RESOLUTION_KEY, "Auto")
         if saved_res != "Auto":
             try:
@@ -339,7 +340,7 @@ class DownloaderApp (QWidget ):
         self.download_location_label_widget = None
         self.remove_from_filename_label_widget = None
         self.skip_words_label_widget = None
-        self.setWindowTitle("Kemono Downloader v6.7.0")
+        self.setWindowTitle("Kemono Downloader v7.8.0")
         setup_ui(self)
         self._connect_signals()
         if hasattr(self, 'character_input'):
@@ -656,6 +657,7 @@ class DownloaderApp (QWidget ):
         settings['more_filter_scope'] = self.more_filter_scope
         settings['text_export_format'] = self.text_export_format
         settings['single_pdf_setting'] = self.single_pdf_setting
+        settings['add_info_in_pdf'] = self.add_info_in_pdf_setting # Save to settings dict
         settings['keep_duplicates_mode'] = self.keep_duplicates_mode
         settings['keep_duplicates_limit'] = self.keep_duplicates_limit
         
@@ -936,7 +938,7 @@ class DownloaderApp (QWidget ):
         domain_override = download_commands.get('domain_override')
         
         args_template = self.last_start_download_args
-        
+        args_template['add_info_in_pdf'] = self.add_info_in_pdf_setting        
         args_template['filter_character_list'] = parsed_filters
         args_template['domain_override'] = domain_override
         
@@ -2938,33 +2940,59 @@ class DownloaderApp (QWidget ):
         return True 
 
     def _handle_more_options_toggled(self, button, checked):
-        """Shows the MoreOptionsDialog when the 'More' radio button is selected."""
+        """
+        Handles the toggle event for the 'More' radio button.
+        Opens the configuration dialog when checked and resets state when unchecked.
+        """
+        # Case 1: The "More" button was just selected
         if button == self.radio_more and checked:
+            # Determine initial values for the dialog based on current state or defaults
             current_scope = self.more_filter_scope or MoreOptionsDialog.SCOPE_CONTENT
             current_format = self.text_export_format or 'pdf'
 
+            # Initialize the dialog with the 'add_info_checked' parameter
             dialog = MoreOptionsDialog(
                 self,
                 current_scope=current_scope,
                 current_format=current_format,
-                single_pdf_checked=self.single_pdf_setting
+                single_pdf_checked=self.single_pdf_setting,
+                add_info_checked=self.add_info_in_pdf_setting  # <--- Pass current setting
             )
 
+            # Show the dialog and wait for user action
             if dialog.exec_() == QDialog.Accepted:
+                # --- User clicked OK: Update settings ---
                 self.more_filter_scope = dialog.get_selected_scope()
                 self.text_export_format = dialog.get_selected_format()
                 self.single_pdf_setting = dialog.get_single_pdf_state()
+                self.add_info_in_pdf_setting = dialog.get_add_info_state()  # <--- Update setting
+
+                # --- Update Button Text ---
                 is_any_pdf_mode = (self.text_export_format == 'pdf')
                 scope_text = "Comments" if self.more_filter_scope == MoreOptionsDialog.SCOPE_COMMENTS else "Description"
-                format_display = f" ({self.text_export_format.upper()})"
+                
+                # Construct a descriptive label (e.g., "Description (PDF [Single+Info])")
+                format_extras = []
                 if self.single_pdf_setting:
-                    format_display = " (Single PDF)"
+                    format_extras.append("Single")
+                if is_any_pdf_mode and self.add_info_in_pdf_setting:
+                    format_extras.append("Info")
+                
+                extra_str = f" [{'+'.join(format_extras)}]" if format_extras else ""
+                format_display = f" ({self.text_export_format.upper()}{extra_str})"
+                
                 self.radio_more.setText(f"{scope_text}{format_display}")
+
+                # --- Handle Option Conflicts (Multithreading) ---
+                # PDF generation requires the main thread or careful management, so we disable multithreading
                 if hasattr(self, 'use_multithreading_checkbox'):
                     self.use_multithreading_checkbox.setEnabled(not is_any_pdf_mode)
                     if is_any_pdf_mode:
                         self.use_multithreading_checkbox.setChecked(False)
                     self._handle_multithreading_toggle(self.use_multithreading_checkbox.isChecked())
+
+                # --- Handle Option Conflicts (Subfolders) ---
+                # Single PDF mode consolidates files, so subfolders are often disabled
                 if hasattr(self, 'use_subfolders_checkbox'):
                     self.use_subfolders_checkbox.setEnabled(not self.single_pdf_setting)
                     if self.single_pdf_setting:
@@ -2975,23 +3003,39 @@ class DownloaderApp (QWidget ):
                     if self.single_pdf_setting:
                         self.use_subfolder_per_post_checkbox.setChecked(False)
 
-                self.log_signal.emit(f"ℹ️ 'More' filter scope set to: {scope_text}, Format: {self.text_export_format.upper()}")
-                self.log_signal.emit(f"ℹ️ Single PDF setting: {'Enabled' if self.single_pdf_setting else 'Disabled'}")
+                # --- Logging ---
+                self.log_signal.emit(f"ℹ️ 'More' filter set: {scope_text}, Format: {self.text_export_format.upper()}")
                 if is_any_pdf_mode:
-                    self.log_signal.emit("ℹ️ Multithreading automatically disabled for PDF export.")
+                    status_single = "Enabled" if self.single_pdf_setting else "Disabled"
+                    status_info = "Enabled" if self.add_info_in_pdf_setting else "Disabled"
+                    self.log_signal.emit(f"   ↳ PDF Options: Single PDF={status_single}, Add Info Page={status_info}")
+                    self.log_signal.emit("   ↳ Multithreading disabled for PDF export.")
+
             else:
+                # --- User clicked Cancel: Revert to default ---
                 self.log_signal.emit("ℹ️ 'More' filter selection cancelled. Reverting to 'All'.")
-                self.radio_all.setChecked(True)
+                if hasattr(self, 'radio_all'):
+                    self.radio_all.setChecked(True)
+
+        # Case 2: Switched AWAY from the "More" button (e.g., clicked 'Images' or 'All')
         elif button != self.radio_more and checked:
             self.radio_more.setText("More")
             self.more_filter_scope = None
             self.single_pdf_setting = False
+            self.add_info_in_pdf_setting = False  # Reset setting
+            
+            # Restore enabled states for options that PDF mode might have disabled
             if hasattr(self, 'use_multithreading_checkbox'):
                 self.use_multithreading_checkbox.setEnabled(True)
-                self._update_multithreading_for_date_mode()
+                self._update_multithreading_for_date_mode() # Re-check manga logic
+            
             if hasattr(self, 'use_subfolders_checkbox'):
                 self.use_subfolders_checkbox.setEnabled(True)
-    
+                
+            if hasattr(self, 'use_subfolder_per_post_checkbox'):
+                # Re-enable based on current subfolder checkbox state
+                self.update_ui_for_subfolders(self.use_subfolders_checkbox.isChecked())
+
     def delete_selected_character (self ):
         global KNOWN_NAMES 
         selected_items =self .character_list .selectedItems ()
@@ -3134,55 +3178,66 @@ class DownloaderApp (QWidget ):
 
             self .manga_rename_toggle_button .setToolTip ("Click to cycle Manga Filename Style (when Renaming Mode is active for a creator feed).")
 
-    def _toggle_manga_filename_style (self ):
+    def _toggle_manga_filename_style(self):
         url_text = self.link_input.text().strip() if self.link_input else ""
-        _, _, post_id = extract_post_info(url_text)
-        is_single_post = bool(post_id)
+        service, _, post_id = extract_post_info(url_text)
+        
+        print(f"DEBUG: Toggle Style - URL: {url_text}, Service Detected: {service}")
 
+        if service == 'deviantart':
+            self.log_signal.emit("ℹ️ DeviantArt mode allows only Custom Renaming format.")
+            
+            self.manga_filename_style = STYLE_CUSTOM
+            self.settings.setValue(MANGA_FILENAME_STYLE_KEY, self.manga_filename_style)
+            self.settings.sync()
+            self._update_manga_filename_style_button_text()
+            
+            self._show_custom_rename_dialog()
+            return
+
+        is_single_post = bool(post_id)
         current_style = self.manga_filename_style
         new_style = ""
-
+        
         if is_single_post:
-            # Cycle through a limited set of styles suitable for single posts
-            if current_style == STYLE_POST_TITLE:
+             # ... (Cycle logic for single posts) ...
+             if current_style == STYLE_POST_TITLE:
                 new_style = STYLE_DATE_POST_TITLE
-            elif current_style == STYLE_DATE_POST_TITLE:
+             elif current_style == STYLE_DATE_POST_TITLE:
                 new_style = STYLE_ORIGINAL_NAME
-            elif current_style == STYLE_ORIGINAL_NAME:
+             elif current_style == STYLE_ORIGINAL_NAME:
                 new_style = STYLE_POST_ID
-            elif current_style == STYLE_POST_ID:
+             elif current_style == STYLE_POST_ID:
                 new_style = STYLE_CUSTOM  
-            elif current_style == STYLE_CUSTOM:  
+             elif current_style == STYLE_CUSTOM:  
                 new_style = STYLE_POST_TITLE  
-            else: # Fallback for any other style
+             else:
                 new_style = STYLE_POST_TITLE
         else:
-            # Original cycling logic for creator feeds
-            if current_style ==STYLE_POST_TITLE :
-                new_style =STYLE_ORIGINAL_NAME 
-            elif current_style ==STYLE_ORIGINAL_NAME :
-                new_style =STYLE_DATE_POST_TITLE 
-            elif current_style ==STYLE_DATE_POST_TITLE :
-                new_style =STYLE_POST_TITLE_GLOBAL_NUMBERING 
-            elif current_style ==STYLE_POST_TITLE_GLOBAL_NUMBERING :
-                new_style =STYLE_DATE_BASED 
-            elif current_style ==STYLE_DATE_BASED :
-                new_style =STYLE_POST_ID 
-            elif current_style ==STYLE_POST_ID: 
-                new_style =STYLE_CUSTOM # <-- CHANGE THIS
-            elif current_style == STYLE_CUSTOM: # <-- ADD THIS
-                new_style = STYLE_POST_TITLE # <-- ADD THIS
-            else :
-                self .log_signal .emit (f"⚠️ Unknown current manga filename style: {current_style }. Resetting to default ('{STYLE_POST_TITLE }').")
-                new_style =STYLE_POST_TITLE 
+             # ... (Cycle logic for creators) ...
+             if current_style == STYLE_POST_TITLE:
+                new_style = STYLE_ORIGINAL_NAME 
+             elif current_style == STYLE_ORIGINAL_NAME:
+                new_style = STYLE_DATE_POST_TITLE 
+             elif current_style == STYLE_DATE_POST_TITLE:
+                new_style = STYLE_POST_TITLE_GLOBAL_NUMBERING 
+             elif current_style == STYLE_POST_TITLE_GLOBAL_NUMBERING:
+                new_style = STYLE_DATE_BASED 
+             elif current_style == STYLE_DATE_BASED:
+                new_style = STYLE_POST_ID 
+             elif current_style == STYLE_POST_ID: 
+                new_style = STYLE_CUSTOM 
+             elif current_style == STYLE_CUSTOM:
+                new_style = STYLE_POST_TITLE
+             else:
+                new_style = STYLE_POST_TITLE 
 
-        self .manga_filename_style =new_style 
-        self .settings .setValue (MANGA_FILENAME_STYLE_KEY ,self .manga_filename_style )
-        self .settings .sync ()
-        self ._update_manga_filename_style_button_text ()
-        self .update_ui_for_manga_mode (self .manga_mode_checkbox .isChecked ()if self .manga_mode_checkbox else False )
-        self .log_signal .emit (f"ℹ️ Manga filename style changed to: '{self .manga_filename_style }'")
-
+        self.manga_filename_style = new_style 
+        self.settings.setValue(MANGA_FILENAME_STYLE_KEY, self.manga_filename_style)
+        self.settings.sync()
+        self._update_manga_filename_style_button_text()
+        self.update_ui_for_manga_mode(self.manga_mode_checkbox.isChecked() if self.manga_mode_checkbox else False)
+        
     def _handle_favorite_mode_toggle (self ,checked ):
         if not self .url_or_placeholder_stack or not self .bottom_action_buttons_stack :
             return 
@@ -3238,7 +3293,6 @@ class DownloaderApp (QWidget ):
         is_discord_url = (service == 'discord')
 
         if is_discord_url:
-            # When a discord URL is detected, disable incompatible options
             if self.manga_mode_checkbox:
                 self.manga_mode_checkbox.setEnabled(False)
                 self.manga_mode_checkbox.setChecked(False)
@@ -3247,13 +3301,11 @@ class DownloaderApp (QWidget ):
             if self.to_label: self.to_label.setEnabled(False)
             if self.end_page_input: self.end_page_input.setEnabled(False)
             checked = False # Force manga mode off
-        # --- END: NEW DISCORD UI LOGIC ---
 
         is_only_links_mode =self .radio_only_links and self .radio_only_links .isChecked ()
         is_only_archives_mode =self .radio_only_archives and self .radio_only_archives .isChecked ()
         is_only_audio_mode =hasattr (self ,'radio_only_audio')and self .radio_only_audio .isChecked ()
 
-        # The rest of the original function continues from here...
         _ ,_ ,post_id =extract_post_info (url_text )
 
         is_creator_feed =not post_id if url_text else False 
@@ -3280,7 +3332,6 @@ class DownloaderApp (QWidget ):
         if self .manga_rename_toggle_button :
             self .manga_rename_toggle_button .setVisible (manga_mode_effectively_on and not (is_only_links_mode or is_only_archives_mode or is_only_audio_mode ))
 
-        # --- MODIFIED: Added check for is_discord_url ---
         if not is_discord_url:
             self .update_page_range_enabled_state ()
 
@@ -3318,7 +3369,20 @@ class DownloaderApp (QWidget ):
 
     def _show_custom_rename_dialog(self):
         """Shows the dialog to edit the custom manga filename format."""
-        dialog = CustomFilenameDialog(self.custom_manga_filename_format, self.manga_custom_date_format, self)
+        
+        # 1. Detect if the current URL is DeviantArt
+        url_text = self.link_input.text().strip() if self.link_input else ""
+        service, _, _ = extract_post_info(url_text)
+        is_deviantart = (service == 'deviantart')
+
+        # 2. Pass the 'is_deviantart' flag to the dialog
+        dialog = CustomFilenameDialog(
+            self.custom_manga_filename_format, 
+            self.manga_custom_date_format, 
+            self, 
+            is_deviantart=is_deviantart  # <--- THIS WAS MISSING
+        )
+        
         if dialog.exec_() == QDialog.Accepted:
             self.custom_manga_filename_format = dialog.get_format_string()
             self.manga_custom_date_format = dialog.get_date_format_string()
@@ -3327,7 +3391,6 @@ class DownloaderApp (QWidget ):
             self.log_signal.emit(f"ℹ️ Custom filename format set to: '{self.custom_manga_filename_format}'")
             self.log_signal.emit(f"ℹ️ Custom date format set to: '{self.manga_custom_date_format}'")
             self._update_manga_filename_style_button_text()
-
 
     def update_multithreading_label (self ,text ):
         if self .use_multithreading_checkbox .isChecked ():
@@ -3445,7 +3508,7 @@ class DownloaderApp (QWidget ):
 
     def _update_contextual_ui_elements(self, text=""):
         """Shows or hides UI elements based on the URL, like the Discord scope button."""
-
+        
         if 'allporncomic.com' in text.lower() and not hasattr(self, 'allcomic_warning_shown'):
             self.allcomic_warning_shown = False
         if 'allporncomic.com' in text.lower() and not self.allcomic_warning_shown:
@@ -3468,13 +3531,53 @@ class DownloaderApp (QWidget ):
         url_text = self.link_input.text().strip()
         service, _, _ = extract_post_info(url_text) 
 
+        # --- DEFINE VARIABLES FIRST ---
+        is_deviantart = (service == 'deviantart')
         is_simpcity = (service == 'simpcity')
+        is_any_discord_url = (service == 'discord')
+        is_saint2 = 'saint2.su' in url_text or 'saint2.pk' in url_text
+        is_erome = 'erome.com' in url_text 
+        is_fap_nation = 'fap-nation.com' in url_text or 'fap-nation.org' in url_text
+
+        # --- UPDATE SPECIALIZED LIST ---
+        is_specialized = service in ['bunkr', 'nhentai', 'hentai2read', 'simpcity', 'deviantart'] or is_saint2 or is_erome
+        
+        # We disable standard UI elements for these services to prevent conflicts
+        is_specialized_for_disabling = service in ['bunkr', 'nhentai', 'hentai2read', 'deviantart'] or is_saint2 or is_erome
+        
+        self._set_ui_for_specialized_downloader(is_specialized_for_disabling)
+
         if hasattr(self, 'advanced_settings_widget'):
             self.advanced_settings_widget.setVisible(not is_simpcity)
         if hasattr(self, 'simpcity_settings_widget'):
             self.simpcity_settings_widget.setVisible(is_simpcity)
 
-        is_any_discord_url = (service == 'discord')
+        if is_deviantart:
+            from ..config.constants import STYLE_CUSTOM
+            
+            if self.manga_filename_style != STYLE_CUSTOM:
+                self.log_signal.emit("ℹ️ DeviantArt mode allows only Custom Renaming format. Switched to Custom.")
+            if self.manga_mode_checkbox:
+                self.manga_mode_checkbox.setEnabled(True)
+                self.manga_mode_checkbox.setToolTip("Enable Custom Renaming for DeviantArt")
+            
+            self.manga_filename_style = STYLE_CUSTOM
+            
+            self._update_manga_filename_style_button_text()
+            
+            if self.manga_rename_toggle_button:
+                self.manga_rename_toggle_button.setEnabled(False) 
+                self.manga_rename_toggle_button.setToolTip("DeviantArt only supports Custom Renaming.")
+            
+            if self.manga_mode_checkbox and self.manga_mode_checkbox.isChecked():
+                if self.manga_rename_toggle_button:
+                    self.manga_rename_toggle_button.setVisible(True)
+                if hasattr(self, 'custom_rename_dialog_button'):
+                    self.custom_rename_dialog_button.setVisible(True)
+        else:
+            if self.manga_rename_toggle_button:
+                self.manga_rename_toggle_button.setEnabled(True)
+
         is_official_discord_url = 'discord.com' in url_text and is_any_discord_url
 
         if is_official_discord_url:
@@ -3488,15 +3591,6 @@ class DownloaderApp (QWidget ):
             self.remove_from_filename_label_widget.setText(self._tr("remove_words_from_name_label", "✂️ Remove Words from name:"))
             self.remove_from_filename_input.setPlaceholderText(self._tr("remove_from_filename_input_placeholder_text", "e.g., patreon, HD"))
             self.remove_from_filename_input.setEchoMode(QLineEdit.Normal)
-
-        is_saint2 = 'saint2.su' in url_text or 'saint2.pk' in url_text
-        is_erome = 'erome.com' in url_text 
-        is_fap_nation = 'fap-nation.com' in url_text or 'fap-nation.org' in url_text
-        
-        is_specialized = service in ['bunkr', 'nhentai', 'hentai2read', 'simpcity'] or is_saint2 or is_erome
-        
-        is_specialized_for_disabling = service in ['bunkr', 'nhentai', 'hentai2read'] or is_saint2 or is_erome
-        self._set_ui_for_specialized_downloader(is_specialized_for_disabling)
 
         self.discord_scope_toggle_button.setVisible(is_any_discord_url)
         if hasattr(self, 'discord_message_limit_input'):
@@ -3533,7 +3627,12 @@ class DownloaderApp (QWidget ):
         return get_theme_stylesheet(actual_scale)
 
     def start_download(self, direct_api_url=None, override_output_dir=None, is_restore=False, is_continuation=False, item_type_from_queue=None):
-        
+
+        global KNOWN_NAMES, BackendDownloadThread, PostProcessorWorker, extract_post_info, MAX_FILE_THREADS_PER_POST_OR_WORKER
+
+        from ..utils.file_utils import clean_folder_name, KNOWN_NAMES
+        from ..config.constants import FOLDER_NAME_STOP_WORDS
+
         if not is_restore and not is_continuation:
             if self.main_log_output: self.main_log_output.clear()
             if self.external_log_output: self.external_log_output.clear()
@@ -3547,7 +3646,29 @@ class DownloaderApp (QWidget ):
 
         if not direct_api_url:
             api_url_text = self.link_input.text().strip().lower()
-            batch_handlers = {
+            batch_handlers = {            
+                'kemono.cr': {
+                    'name': 'Kemono Batch',
+                    'txt_file': 'kemono.txt',
+                    'url_regex': r'https?://(?:www\.)?kemono\.(?:su|party|cr)/[^/\s]+/user/\d+(?:/post/\d+)?/?'
+                },
+                'kemono.su': {
+                    'name': 'Kemono Batch',
+                    'txt_file': 'kemono.txt',
+                    'url_regex': r'https?://(?:www\.)?kemono\.(?:su|party|cr)/[^/\s]+/user/\d+(?:/post/\d+)?/?'
+                },
+
+                'coomer.st': {
+                    'name': 'Coomer Batch',
+                    'txt_file': 'coomer.txt',
+                    'url_regex': r'https?://(?:www\.)?coomer\.(?:su|party|st)/[^/\s]+/user/[^/\s]+(?:/post/\d+)?/?'
+                },
+                'coomer.su': {
+                    'name': 'Coomer Batch',
+                    'txt_file': 'coomer.txt',
+                    'url_regex': r'https?://(?:www\.)?coomer\.(?:su|party|st)/[^/\s]+/user/[^/\s]+(?:/post/\d+)?/?'
+                },
+
                 'allporncomic.com': {
                     'name': 'AllPornComic',
                     'txt_file': 'allporncomic.txt',
@@ -3621,20 +3742,74 @@ class DownloaderApp (QWidget ):
                 
                 self.log_signal.emit(f"   Found {len(urls_to_download)} URLs to process.")
                 self.favorite_download_queue.clear()
+             
+                self_managed_folder_sites = [
+                    'allporncomic.com', 'allcomic.com', 
+                    'fap-nation.com', 'fap-nation.org', 
+                    'toonily.com', 'toonily.me',
+                    'hentai2read.com',
+                    'saint2.su', 'saint2.pk',
+                    'imgur.com', 'bunkr.'
+                ]
+
                 for url in urls_to_download:
+                    # 1. Check if this site manages its own folders
+                    is_self_managed = any(site in url.lower() for site in self_managed_folder_sites)
+                    
+                    # 2. Extract info
+                    service_extracted, user_id_extracted, pid = extract_post_info(url)
+                    
+                    # Default values
+                    force_folder = False
+                    folder_name_to_use = "Unknown_Batch_Item"
+                    item_type = 'post' # Default to post/comic
+
+                    if is_self_managed:
+                        # Case A: Self-Managed Sites (AllPornComic, FapNation, etc.)
+                        # We do NOT force a folder here. We let the specialized downloader create 
+                        # the correct folder (e.g. "Main Title") inside the root directory.
+                        force_folder = False
+                        folder_name_to_use = "Auto-Detected" # Placeholder, won't be used for root folder
+                        item_type = 'post'
+
+                    elif service_extracted:
+                        # Case B: Standard ID-based sites (Kemono, Coomer, Nhentai, etc.)
+                        # We MUST force a folder (Artist Name) to keep them organized.
+                        item_type = 'post' if pid else 'artist'
+                        force_folder = True
+                        
+                        cache_key = (service_extracted.lower(), str(user_id_extracted))
+                        creator_name = self.creator_name_cache.get(cache_key)
+                        
+                        if creator_name:
+                            folder_name_to_use = clean_folder_name(creator_name)
+                        else:
+                            folder_name_to_use = f"{service_extracted}_{user_id_extracted}"
+                    
+                    else:
+                        # Case C: Unknown sites (Fallback)
+                        # We force a folder based on the URL slug to ensure it doesn't clutter the root.
+                        try:
+                            path_parts = urlparse(url).path.strip('/').split('/')
+                            folder_candidate = path_parts[-1] if path_parts else "Unknown_Item"
+                            folder_name_to_use = clean_folder_name(folder_candidate)
+                            force_folder = True
+                        except Exception:
+                            folder_name_to_use = "Unknown_Batch_Item"
+                            force_folder = True
+
+                    # 3. Add to queue
                     self.favorite_download_queue.append({
                         'url': url,
-                        'name': f"{name} link from batch",
-                        'type': 'post'
+                        'name': f"{name} batch: {folder_name_to_use}",
+                        'name_for_folder': folder_name_to_use,
+                        'type': item_type,
+                        'force_artist_folder': force_folder  # <--- Only True for Kemono/Coomer/Unknown
                     })
-                
+
                 if not self.is_processing_favorites_queue:
                        self._process_next_favorite_download()
                 return True # Stop further execution of start_download
-
-
-        from ..utils.file_utils import clean_folder_name
-        from ..config.constants import FOLDER_NAME_STOP_WORDS
 
         if self.is_ready_to_download_fetched:
             self._start_download_of_fetched_posts()
@@ -3649,7 +3824,6 @@ class DownloaderApp (QWidget ):
 
         self.is_finishing = False
         self.downloaded_hash_counts.clear()
-        global KNOWN_NAMES, BackendDownloadThread, PostProcessorWorker, extract_post_info, MAX_FILE_THREADS_PER_POST_OR_WORKER
 
         if not is_restore and not is_continuation:
             self.permanently_failed_files_for_dialog.clear()
@@ -4321,7 +4495,8 @@ class DownloaderApp (QWidget ):
             'start_offset': start_offset_for_restore, 
             'fetch_first': fetch_first_enabled, 
             'sfp_threshold': download_commands.get('sfp_threshold'),
-            'handle_unknown_mode': handle_unknown_command 
+            'handle_unknown_mode': handle_unknown_command,
+            'add_info_in_pdf': self.add_info_in_pdf_setting,             
         }
 
         args_template['override_output_dir'] = override_output_dir
@@ -4734,6 +4909,7 @@ class DownloaderApp (QWidget ):
             'use_cookie': self.use_cookie_checkbox.isChecked(),
             'cookie_text': self.cookie_text_input.text(),
             'selected_cookie_file': self.selected_cookie_filepath,
+            'add_info_in_pdf': self.add_info_in_pdf_setting,            
         }
 
         # 2. Define DEFAULTS for all settings that *should* be in the profile.
@@ -4776,6 +4952,7 @@ class DownloaderApp (QWidget ):
             'target_post_id_from_initial_url': None,
             'override_output_dir': None,
             'processed_post_ids': [],
+            'add_info_in_pdf': False,
         }
 
         for item in self.fetched_posts_for_batch_update:
@@ -4784,18 +4961,33 @@ class DownloaderApp (QWidget ):
             # --- THIS IS THE NEW, CORRECTED LOGIC ---
             full_profile_data = item.get('profile_data', {})
             saved_settings = full_profile_data.get('settings', {})
-            # --- END OF NEW LOGIC ---
-
-            # 3. Construct the final arguments for this specific worker
-            
-            # Start with a full set of defaults
             args_for_this_worker = default_profile_settings.copy()
-            # Overwrite with any settings saved in the profile
-            # This is where {"filter_mode": "video"} from Maplestar.json is applied
-            args_for_this_worker.update(saved_settings)
-            # Add all the live runtime arguments
+            
+            # Check the override flag we set in _show_empty_popup
+            if getattr(self, 'override_update_profile_settings', False):
+                # If overriding, we rely PURELY on live_runtime_args (which reflect current UI state)
+                # We do NOT update with saved_settings.
+                # However, live_runtime_args only has *some* args. We need the FULL UI state.
+                # So we fetch the full UI state now.
+                current_ui_settings = self._get_current_ui_settings_as_dict(
+                    api_url_override=saved_settings.get('api_url') # Preserve the URL from profile
+                )
+                args_for_this_worker.update(current_ui_settings)
+                
+                # IMPORTANT: Update the profile data in memory so it gets saved correctly later
+                full_profile_data['settings'] = current_ui_settings
+                
+                # OPTIONAL: Save the JSON immediately to disk to persist changes even if crash
+                creator_name = item.get('creator_name')
+                if creator_name:
+                    self._save_creator_profile(creator_name, full_profile_data, self.session_file_path)
+                    
+            else:
+                # Standard behavior: Load saved settings, then overlay runtime overrides
+                args_for_this_worker.update(saved_settings)
+            
+            # Apply live runtime args (always apply these last as they contain critical objects like emitters)
             args_for_this_worker.update(live_runtime_args)
-
             # 4. Manually parse values from the constructed args
             
             # Set post-specific data
@@ -4936,6 +5128,7 @@ class DownloaderApp (QWidget ):
         self.more_filter_scope = settings.get('more_filter_scope')
         self.text_export_format = settings.get('text_export_format', 'pdf')
         self.single_pdf_setting = settings.get('single_pdf_setting', False)
+        self.add_info_in_pdf_setting = settings.get('add_info_in_pdf', False) # Load setting
         if self.radio_more.isChecked() and self.more_filter_scope:
             from .dialogs.MoreOptionsDialog import MoreOptionsDialog
             scope_text = "Comments" if self.more_filter_scope == MoreOptionsDialog.SCOPE_COMMENTS else "Description"
@@ -5135,7 +5328,13 @@ class DownloaderApp (QWidget ):
         self.log_signal.emit("   Sorting collected posts by date (oldest first)...")
         sorted_content = sorted(posts_content_data, key=lambda x: x.get('published', 'Z'))
 
-        create_single_pdf_from_content(sorted_content, filepath, font_path, logger=self.log_signal.emit)
+        create_single_pdf_from_content(
+            sorted_content, 
+            filepath, 
+            font_path, 
+            add_info_page=self.add_info_in_pdf_setting, # Pass the flag here
+            logger=self.log_signal.emit
+        )
         self.log_signal.emit("="*40)
 
     def _add_to_history_candidates(self, history_data):
@@ -5533,6 +5732,10 @@ class DownloaderApp (QWidget ):
         if not self.finish_lock.acquire(blocking=False):
             return
 
+        # --- Flag to track if we still hold the lock ---
+        lock_held = True 
+        # ----------------------------------------------------
+
         try:
             if self.is_finishing:
                 return
@@ -5554,16 +5757,21 @@ class DownloaderApp (QWidget ):
 
             self.log_signal.emit("🏁 Download of current item complete.")
 
+            # --- QUEUE PROCESSING BLOCK ---
             if self.is_processing_favorites_queue and self.favorite_download_queue:
                 self.log_signal.emit("✅ Item finished. Processing next in queue...")
                 if self.download_thread and isinstance(self.download_thread, QThread):
                     self.download_thread.deleteLater()
-                self.download_thread = None # This is the crucial line    
+                self.download_thread = None 
                 self.is_finishing = False 
 
+                # FIX: Manual release + update flag
                 self.finish_lock.release()
+                lock_held = False 
+                
                 self._process_next_favorite_download()
                 return  
+            # ---------------------------------------------------------
 
             if self.is_processing_favorites_queue:
                 self.is_processing_favorites_queue = False
@@ -5618,7 +5826,6 @@ class DownloaderApp (QWidget ):
             if self.download_thread:
                 if isinstance(self.download_thread, QThread):
                     try:
-                        # Disconnect signals to prevent any lingering connections
                         if hasattr(self.download_thread, 'progress_signal'): self.download_thread.progress_signal.disconnect(self.handle_main_log)
                         if hasattr(self.download_thread, 'add_character_prompt_signal'): self.download_thread.add_character_prompt_signal.disconnect(self.add_character_prompt_signal)
                         if hasattr(self.download_thread, 'finished_signal'): self.download_thread.finished_signal.disconnect(self.download_finished)
@@ -5644,6 +5851,7 @@ class DownloaderApp (QWidget ):
             )
             self.file_progress_label.setText("")
 
+            # --- RETRY PROMPT BLOCK ---
             if not cancelled_by_user and self.retryable_failed_files_info:
                 num_failed = len(self.retryable_failed_files_info)
                 reply = QMessageBox.question(self, "Retry Failed Downloads?",
@@ -5652,7 +5860,11 @@ class DownloaderApp (QWidget ):
                                              QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
                 if reply == QMessageBox.Yes:
                     self.is_finishing = False
+                    
+                    # FIX: Manual release + update flag
                     self.finish_lock.release()
+                    lock_held = False
+                    
                     self._start_failed_files_retry_session()
                     return
                 else:
@@ -5663,9 +5875,9 @@ class DownloaderApp (QWidget ):
                     self.cancellation_message_logged_this_session = False
                     self.retryable_failed_files_info.clear()
 
-
             auto_retry_enabled = self.settings.value(AUTO_RETRY_ON_FINISH_KEY, False, type=bool)
             
+            # --- AUTO RETRY BLOCK ---
             if not cancelled_by_user and auto_retry_enabled and self.permanently_failed_files_for_dialog:
                 num_files_to_retry = len(self.permanently_failed_files_for_dialog)
                 self.log_signal.emit("=" * 40)
@@ -5680,7 +5892,6 @@ class DownloaderApp (QWidget ):
 
             self.is_fetcher_thread_running = False
             
-            # --- This is where the post-download action is triggered ---
             if not cancelled_by_user and not self.is_processing_favorites_queue:
                 self._execute_post_download_action()
 
@@ -5688,8 +5899,12 @@ class DownloaderApp (QWidget ):
             self._update_button_states_and_connections()
             self.cancellation_message_logged_this_session = False
             self.active_update_profile = None 
+        
         finally:
-            self.finish_lock.release()
+            # --- Only release if we still hold it ---
+            if lock_held:
+                self.finish_lock.release()
+            # ---------------------------------------------
 
     def _execute_post_download_action(self):
         """Checks the settings and performs the chosen action after downloads complete."""
@@ -5845,6 +6060,7 @@ class DownloaderApp (QWidget ):
         'domain_override': domain_override_command,
         'sfp_threshold': sfp_threshold_command, 
         'handle_unknown_mode': handle_unknown_command, 
+        
         'filter_mode':self .get_filter_mode (),
         'skip_zip':self .skip_zip_checkbox .isChecked (),
         'use_subfolders':self .use_subfolders_checkbox .isChecked (),
@@ -5868,13 +6084,11 @@ class DownloaderApp (QWidget ):
         'target_post_id_from_initial_url':None ,
         'custom_folder_name':None ,
         'num_file_threads':1 ,
-
-        # --- START: ADDED COOKIE FIX ---
+        'add_info_in_pdf': self.add_info_in_pdf_setting,
         'use_cookie': self.use_cookie_checkbox.isChecked(),
         'cookie_text': self.cookie_text_input.text(),
         'selected_cookie_file': self.selected_cookie_filepath,
         'app_base_dir': self.app_base_dir,
-        # --- END: ADDED COOKIE FIX ---
 
         'manga_date_file_counter_ref':None ,
         }
@@ -6576,14 +6790,30 @@ class DownloaderApp (QWidget ):
             return
         dialog = EmptyPopupDialog(self.user_data_path, self)
         if dialog.exec_() == QDialog.Accepted:
-            # --- NEW BATCH UPDATE LOGIC ---
+            
+# --- START OF MODIFICATION ---
             if hasattr(dialog, 'update_profiles_list') and dialog.update_profiles_list:
                 self.active_update_profiles_list = dialog.update_profiles_list
+                
+                # --- NEW LOGIC: Check if user wants to load settings into UI ---
+                load_settings_requested = getattr(dialog, 'load_settings_into_ui_requested', False)
+                self.override_update_profile_settings = load_settings_requested 
+                
+                if load_settings_requested:
+                    self.log_signal.emit("ℹ️ User requested to edit settings. Loading profile settings into UI...")
+                    # Load the settings from the FIRST profile into the main window UI
+                    first_profile_settings = self.active_update_profiles_list[0]['data'].get('settings', {})
+                    self._load_ui_from_settings_dict(first_profile_settings)
+                    # We do NOT start the check immediately if we are editing settings?
+                    # Actually, the workflow is: Check for Updates -> Find new posts -> THEN Download.
+                    # So we should still proceed with the check, but note that we are in override mode.
+                    
                 self.log_signal.emit(f"ℹ️ Loaded {len(self.active_update_profiles_list)} creator profile(s). Checking for updates...")
                 self.link_input.setText(f"{len(self.active_update_profiles_list)} profiles loaded for update check...")
+                
                 self._start_batch_update_check(self.active_update_profiles_list)
-
-            # --- Original logic for adding creators to queue ---
+            # --- END OF MODIFICATION ---           
+           
             elif hasattr(dialog, 'selected_creators_for_queue') and dialog.selected_creators_for_queue:
                 self.active_update_profile = None # Ensure single update mode is off
                 self.favorite_download_queue.clear()
@@ -6830,11 +7060,19 @@ class DownloaderApp (QWidget ):
         main_download_dir = self.dir_input.text().strip()
 
         should_create_artist_folder = False
+      
+# --- Check for popup selection scope ---
         if item_type == 'creator_popup_selection' and item_scope == EmptyPopupDialog.SCOPE_CREATORS:
             should_create_artist_folder = True
+        # --- Check for global "Artist Folders" scope ---
         elif item_type != 'creator_popup_selection' and self.favorite_download_scope == FAVORITE_SCOPE_ARTIST_FOLDERS:
             should_create_artist_folder = True
-
+            
+        # --- NEW: Check for forced folder flag from batch ---
+        if self.current_processing_favorite_item_info.get('force_artist_folder'):
+            should_create_artist_folder = True
+        # ---------------------------------------------------
+       
         if should_create_artist_folder and main_download_dir:
             folder_name_key = self.current_processing_favorite_item_info.get('name_for_folder', 'Unknown_Folder')
             item_specific_folder_name = clean_folder_name(folder_name_key)

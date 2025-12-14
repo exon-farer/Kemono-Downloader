@@ -7,7 +7,6 @@ from PyQt5.QtCore import Qt
 class CustomFilenameDialog(QDialog):
     """A dialog for creating a custom filename format string."""
     
-    # --- REPLACE THE 'AVAILABLE_KEYS' LIST WITH THIS DICTIONARY ---
     DISPLAY_KEY_MAP = {
         "PostID": "id",
         "CreatorName": "creator_name",  
@@ -19,7 +18,10 @@ class CustomFilenameDialog(QDialog):
         "name": "name"
     }
 
-    def __init__(self, current_format, current_date_format, parent=None):
+    # STRICT LIST: Only these three will be clickable for DeviantArt
+    DA_ALLOWED_KEYS = ["creator_name", "title", "published"]
+
+    def __init__(self, current_format, current_date_format, parent=None, is_deviantart=False):
         super().__init__(parent)
         self.setWindowTitle("Custom Filename Format")
         self.setMinimumWidth(500)
@@ -31,9 +33,11 @@ class CustomFilenameDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # --- Description ---
-        description_label = QLabel(
-            "Create a filename format using placeholders. The date/time values for 'added', 'published', and 'edited' will be automatically shortened to your specified format."
-        )
+        desc_text = "Create a filename format using placeholders. The date/time values will be automatically formatted."
+        if is_deviantart:
+            desc_text += "\n\n(DeviantArt Mode: Only Creator Name, Title, and Upload Date are available. Other buttons are disabled.)"
+            
+        description_label = QLabel(desc_text)
         description_label.setWordWrap(True)
         layout.addWidget(description_label)
         
@@ -42,15 +46,20 @@ class CustomFilenameDialog(QDialog):
         layout.addWidget(format_label)
         self.format_input = QLineEdit(self)
         self.format_input.setText(self.current_format)
-        self.format_input.setPlaceholderText("e.g., {published} {title} {id}")
+        
+        if is_deviantart:
+            self.format_input.setPlaceholderText("e.g., {published} {title} {creator_name}")
+        else:
+            self.format_input.setPlaceholderText("e.g., {published} {title} {id}")
+            
         layout.addWidget(self.format_input)
 
         # --- Date Format Input ---
-        date_format_label = QLabel("Date Format (for {added}, {published}, {edited}):")
+        date_format_label = QLabel("Date Format (for {published}):")
         layout.addWidget(date_format_label)
         self.date_format_input = QLineEdit(self)
         self.date_format_input.setText(self.current_date_format)
-        self.date_format_input.setPlaceholderText("e.g., YYYY-MM-DD or DD-MM-YYYY")
+        self.date_format_input.setPlaceholderText("e.g., YYYY-MM-DD")
         layout.addWidget(self.date_format_input)
 
         # --- Available Keys Display ---
@@ -62,7 +71,20 @@ class CustomFilenameDialog(QDialog):
         
         for display_key, internal_key in self.DISPLAY_KEY_MAP.items():
             key_button = QPushButton(f"{{{display_key}}}")
-            # Use a lambda to pass the correct internal key when the button is clicked
+            
+# --- DeviantArt Logic ---
+            if is_deviantart:
+                if internal_key in self.DA_ALLOWED_KEYS:
+                    # Active buttons: Bold text, enabled
+                    key_button.setStyleSheet("font-weight: bold; color: black;")
+                    key_button.setEnabled(True)
+                else:
+                    # Inactive buttons: Disabled (Cannot be clicked)
+                    key_button.setEnabled(False) 
+                    key_button.setToolTip("Not available for DeviantArt")
+            # ------------------------
+            
+            # Use a lambda to pass the correct internal key when clicked
             key_button.clicked.connect(lambda checked, key=internal_key: self.add_key_to_input(key))
             keys_layout.addWidget(key_button)
         keys_layout.addStretch()
@@ -81,9 +103,7 @@ class CustomFilenameDialog(QDialog):
         self.format_input.setFocus()
 
     def get_format_string(self):
-        """Returns the final format string from the input field."""
         return self.format_input.text().strip()
 
     def get_date_format_string(self):
-        """Returns the date format string from its input field."""
         return self.date_format_input.text().strip()

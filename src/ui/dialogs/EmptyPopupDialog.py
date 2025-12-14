@@ -156,6 +156,9 @@ class EmptyPopupDialog (QDialog ):
         
         # --- MODIFIED: Store a list of profiles now ---
         self.update_profiles_list = None
+        # --- NEW: Flag to indicate if settings should load to UI ---
+        self.load_settings_into_ui_requested = False
+        
         # --- DEPRECATED (kept for compatibility if needed, but new logic won't use them) ---
         self.update_profile_data = None
         self.update_creator_name = None
@@ -341,6 +344,9 @@ class EmptyPopupDialog (QDialog ):
         if dialog.exec_() == QDialog.Accepted:
             # --- MODIFIED: Get a list of profiles now ---
             selected_profiles = dialog.get_selected_profiles()
+            # --- NEW: Get the checkbox state ---
+            self.load_settings_into_ui_requested = dialog.should_load_into_ui()
+            
             if selected_profiles:
                 try:
                     # --- MODIFIED: Store the list ---

@@ -20,7 +20,6 @@
 │       ├── DejaVuSansCondensed-BoldOblique.ttf
 │       ├── DejaVuSansCondensed-Oblique.ttf
 │       └── DejaVuSansCondensed.ttf
-├── directory_tree.txt
 ├── main.py
 ├── src/
 │   ├── __init__.py

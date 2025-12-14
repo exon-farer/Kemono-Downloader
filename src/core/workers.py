@@ -56,12 +56,13 @@ from ..utils.text_utils import (
     match_folders_from_title, match_folders_from_filename_enhanced
 )
 from ..config.constants import *
+from ..ui.dialogs.SinglePDF import create_individual_pdf
 
 def robust_clean_name(name):
     """A more robust function to remove illegal characters for filenames and folders."""
     if not name:
         return ""
-    illegal_chars_pattern = r'[\x00-\x1f<>:"/\\|?*\'\[\]]'
+    illegal_chars_pattern = r'[\x00-\x1f<>:"/\\|?*\']'
     cleaned_name = re.sub(illegal_chars_pattern, '', name)
 
     cleaned_name = cleaned_name.strip(' .')
@@ -132,6 +133,8 @@ class PostProcessorWorker:
                  sfp_threshold=None,
                  handle_unknown_mode=False,
                  creator_name_cache=None,
+                 add_info_in_pdf=False
+
                  ):
         self.post = post_data
         self.download_root = download_root
@@ -205,6 +208,10 @@ class PostProcessorWorker:
         self.sfp_threshold = sfp_threshold 
         self.handle_unknown_mode = handle_unknown_mode 
         self.creator_name_cache = creator_name_cache 
+        #-- New assign --
+        self.add_info_in_pdf = add_info_in_pdf
+        #-- New assign --
+
 
         if self.compress_images and Image is None:
             self.logger("⚠️ Image compression disabled: Pillow library not found.")
@@ -974,6 +981,92 @@ class PostProcessorWorker:
             else:
                 return 0, 1, filename_to_save_in_main_path, was_original_name_kept_flag, FILE_DOWNLOAD_STATUS_FAILED_RETRYABLE_LATER, details_for_failure
 
+    def _get_manga_style_filename_for_post(self, post_title, original_ext):
+        """Generates a filename based on manga style, using post data."""
+        if self.manga_filename_style == STYLE_POST_TITLE:
+            cleaned_post_title_base = robust_clean_name(post_title.strip() if post_title and post_title.strip() else "post")
+            return f"{cleaned_post_title_base}{original_ext}"
+            
+        elif self.manga_filename_style == STYLE_CUSTOM:
+            try:
+                def format_date(date_str):
+                    if not date_str or 'NoDate' in date_str:
+                        return "NoDate"
+                    try:
+                        dt_obj = datetime.fromisoformat(date_str)
+                        strftime_format = self.manga_custom_date_format.replace("YYYY", "%Y").replace("MM", "%m").replace("DD", "%d")
+                        return dt_obj.strftime(strftime_format)
+                    except (ValueError, TypeError):
+                        return date_str.split('T')[0]
+
+                service = self.service.lower()
+                user_id = str(self.user_id)
+                creator_name = self.creator_name_cache.get((service, user_id), user_id)
+
+                added_date = self.post.get('added')
+                published_date = self.post.get('published')
+                edited_date = self.post.get('edited')
+
+                format_values = {
+                    'id': str(self.post.get('id', '')),
+                    'user': user_id,
+                    'creator_name': creator_name,
+                    'service': self.service,
+                    'title': str(self.post.get('title', '')),
+                    'name': robust_clean_name(post_title), # Use post title as a fallback 'name'
+                    'added': format_date(added_date or published_date),
+                    'published': format_date(published_date),
+                    'edited': format_date(edited_date or published_date)
+                }
+                
+                custom_base_name = self.manga_custom_filename_format.format(**format_values)
+                cleaned_custom_name = robust_clean_name(custom_base_name)
+                
+                return f"{cleaned_custom_name}{original_ext}"
+                
+            except (KeyError, IndexError, ValueError) as e:
+                self.logger(f"⚠️ Custom format error for text export: {e}. Falling back to post title.")
+                return f"{robust_clean_name(post_title.strip() or 'untitled_post')}{original_ext}"
+        
+        elif self.manga_filename_style == STYLE_DATE_POST_TITLE:
+            published_date_str = self.post.get('published')
+            added_date_str = self.post.get('added')
+            formatted_date_str = "nodate"
+            if published_date_str:
+                try:
+                    formatted_date_str = published_date_str.split('T')[0]
+                except Exception:
+                    pass
+            elif added_date_str:
+                try:
+                    formatted_date_str = added_date_str.split('T')[0]
+                except Exception:
+                    pass
+
+            cleaned_post_title_for_filename = robust_clean_name(post_title.strip() or "post")
+            base_name_for_style = f"{formatted_date_str}_{cleaned_post_title_for_filename}"
+            return f"{base_name_for_style}{original_ext}"
+        
+        elif self.manga_filename_style == STYLE_POST_ID:
+            post_id = str(self.post.get('id', 'unknown_id'))
+            return f"{post_id}{original_ext}"
+            
+        elif self.manga_filename_style == STYLE_ORIGINAL_NAME:
+            published_date_str = self.post.get('published') or self.post.get('added')
+            formatted_date_str = "nodate"
+            if published_date_str:
+                try:
+                    formatted_date_str = published_date_str.split('T')[0]
+                except Exception:
+                    pass
+            
+            # Use post title as the name part, as there is no "original filename" for the text export.
+            cleaned_post_title_base = robust_clean_name(post_title.strip() or "untitled_post")
+            return f"{formatted_date_str}_{cleaned_post_title_base}{original_ext}"
+
+        # Default fallback
+        return f"{robust_clean_name(post_title.strip() or 'untitled_post')}{original_ext}"
+
     def process(self):
         result_tuple = (0, 0, [], [], [], None, None)
         try:
@@ -1269,6 +1362,8 @@ class PostProcessorWorker:
             if self.filter_mode == 'text_only' and not self.extract_links_only:
                 self.logger(f"   Mode: Text Only (Scope: {self.text_only_scope})")
                 post_title_lower = post_title.lower()
+                
+                # --- Skip Words Check ---
                 if self.skip_words_list and (self.skip_words_scope == SKIP_SCOPE_POSTS or self.skip_words_scope == SKIP_SCOPE_BOTH):
                     for skip_word in self.skip_words_list:
                         if skip_word.lower() in post_title_lower:
@@ -1287,6 +1382,7 @@ class PostProcessorWorker:
                 comments_data = []
                 final_post_data = post_data
                 
+                # --- Content Fetching ---
                 if self.text_only_scope == 'content' and 'content' not in final_post_data:
                     self.logger(f"   Post {post_id} is missing 'content' field, fetching full data...")
                     parsed_url = urlparse(self.api_url_input)
@@ -1304,6 +1400,8 @@ class PostProcessorWorker:
                         api_domain = parsed_url.netloc
                         comments_data = fetch_post_comments(api_domain, self.service, self.user_id, post_id, headers, self.logger, self.cancellation_event, self.pause_event)
                         if comments_data:
+                            # For TXT/DOCX export, we format comments here. 
+                            # For PDF, we pass the raw list to the generator.
                             comment_texts = []
                             for comment in comments_data:
                                 user = comment.get('commenter_name', 'Unknown User')
@@ -1335,23 +1433,43 @@ class PostProcessorWorker:
                     self._emit_signal('worker_finished', result_tuple)
                     return result_tuple
 
+                # --- Metadata Preparation ---
+                # Prepare all data needed for the info page or JSON dump
+                service_str = self.service
+                user_id_str = str(self.user_id)
+                post_id_str = str(post_id)
+                creator_key = (service_str.lower(), user_id_str)
+                
+                # Resolve creator name using the cache passed from main_window
+                creator_name = user_id_str
+                if self.creator_name_cache:
+                    creator_name = self.creator_name_cache.get(creator_key, user_id_str)
+
+                common_content_data = {
+                    'title': post_title,
+                    'published': self.post.get('published') or self.post.get('added'),
+                    'service': service_str,
+                    'user': user_id_str,
+                    'id': post_id_str,
+                    'tags': self.post.get('tags'),
+                    'original_link': post_page_url,
+                    'creator_name': creator_name
+                }
+
+                # --- Single PDF Mode (Save Temp JSON) ---
                 if self.single_pdf_mode:
-                    content_data = {
-                        'title': post_title,
-                        'published': self.post.get('published') or self.post.get('added')
-                    }
                     if self.text_only_scope == 'comments':
                         if not comments_data: 
                             result_tuple = (0, 0, [], [], [], None, None)
                             self._emit_signal('worker_finished', result_tuple)
                             return result_tuple
-                        content_data['comments'] = comments_data
+                        common_content_data['comments'] = comments_data
                     else:
                         if not cleaned_text.strip():
                             result_tuple = (0, 0, [], [], [], None, None)
                             self._emit_signal('worker_finished', result_tuple)
                             return result_tuple
-                        content_data['content'] = cleaned_text
+                        common_content_data['content'] = cleaned_text
 
                     temp_dir = os.path.join(self.app_base_dir, "appdata")
                     os.makedirs(temp_dir, exist_ok=True)
@@ -1359,7 +1477,7 @@ class PostProcessorWorker:
                     temp_filepath = os.path.join(temp_dir, temp_filename)
                     try:
                         with open(temp_filepath, 'w', encoding='utf-8') as f:
-                            json.dump(content_data, f, indent=2)
+                            json.dump(common_content_data, f, indent=2)
                         self.logger(f"   Saved temporary data for '{post_title}' for single PDF compilation.")
                         result_tuple = (0, 0, [], [], [], None, temp_filepath)
                         self._emit_signal('worker_finished', result_tuple)
@@ -1369,82 +1487,67 @@ class PostProcessorWorker:
                         result_tuple = (0, 0, [], [], [], None, None)
                         self._emit_signal('worker_finished', result_tuple)
                         return result_tuple
+                
+                # --- Individual File Mode ---
                 else:
                     file_extension = self.text_export_format
-                    txt_filename = clean_filename(post_title) + f".{file_extension}"
+                    txt_filename = ""
+                                        
+                    if self.manga_mode_active:
+                        txt_filename = self._get_manga_style_filename_for_post(post_title, f".{file_extension}")
+                        self.logger(f"   ℹ️ Applying Renaming Mode. Generated filename: '{txt_filename}'")
+                    else:
+                        txt_filename = clean_filename(post_title) + f".{file_extension}"                       
+                       
                     final_save_path = os.path.join(determined_post_save_path_for_history, txt_filename)
+
                     try:
                         os.makedirs(determined_post_save_path_for_history, exist_ok=True)
-                        base, ext = os.path.splitext(final_save_path)
+                        base, ext = os.path.splitext(final_save_path)                    
+                    
                         counter = 1
                         while os.path.exists(final_save_path):
                             final_save_path = f"{base}_{counter}{ext}"
                             counter += 1
 
+                        # --- PDF Generation ---
                         if file_extension == 'pdf':
-                            if FPDF:
-                                self.logger(f"   Creating formatted PDF for {'comments' if self.text_only_scope == 'comments' else 'content'}...")
-                                pdf = PDF()
-                                base_path = self.project_root_dir
-                                font_path = ""
-                                bold_font_path = ""
-
-                                if base_path:
-                                    font_path = os.path.join(base_path, 'data', 'dejavu-sans', 'DejaVuSans.ttf')
-                                    bold_font_path = os.path.join(base_path, 'data', 'dejavu-sans', 'DejaVuSans-Bold.ttf')
-
-                                try:
-                                    if not os.path.exists(font_path): raise RuntimeError(f"Font file not found: {font_path}")
-                                    if not os.path.exists(bold_font_path): raise RuntimeError(f"Bold font file not found: {bold_font_path}")
-                                    pdf.add_font('DejaVu', '', font_path, uni=True)
-                                    pdf.add_font('DejaVu', 'B', bold_font_path, uni=True)
-                                    default_font_family = 'DejaVu'
-                                except Exception as font_error:
-                                    self.logger(f"   ⚠️ Could not load DejaVu font: {font_error}. Falling back to Arial.")
-                                    default_font_family = 'Arial'
-
-                                pdf.add_page()
-                                pdf.set_font(default_font_family, 'B', 16)
-                                pdf.multi_cell(0, 10, post_title)
-                                pdf.ln(10)
-
-                                if self.text_only_scope == 'comments':
-                                    if not comments_data:
-                                        self.logger("   -> Skip PDF Creation: No comments to process.")
-                                        result_tuple = (0, num_potential_files_in_post, [], [], [], None, None)
-                                        self._emit_signal('worker_finished', result_tuple)
-                                        return result_tuple
-                                    for i, comment in enumerate(comments_data):
-                                        user = comment.get('commenter_name', 'Unknown User')
-                                        timestamp = comment.get('published', 'No Date')
-                                        body = strip_html_tags(comment.get('content', ''))
-                                        pdf.set_font(default_font_family, '', 10)
-                                        pdf.write(8, "Comment by: ")
-                                        pdf.set_font(default_font_family, 'B', 10)
-                                        pdf.write(8, user)
-                                        pdf.set_font(default_font_family, '', 10)
-                                        pdf.write(8, f" on {timestamp}")
-                                        pdf.ln(10)
-                                        pdf.set_font(default_font_family, '', 11)
-                                        pdf.multi_cell(0, 7, body)
-                                        if i < len(comments_data) - 1:
-                                            pdf.ln(5)
-                                            pdf.cell(0, 0, '', border='T')
-                                            pdf.ln(5)
-                                else:
-                                    pdf.set_font(default_font_family, '', 12)
-                                    pdf.multi_cell(0, 7, cleaned_text)
-
-                                pdf.output(final_save_path)
+                            # Font setup
+                            font_path = ""
+                            if self.project_root_dir:
+                                font_path = os.path.join(self.project_root_dir, 'data', 'dejavu-sans', 'DejaVuSans.ttf')
+                            
+                            # Add content specific fields for the generator
+                            if self.text_only_scope == 'comments':
+                                common_content_data['comments_list_for_pdf'] = comments_data
                             else:
-                                self.logger(f"   ⚠️ Cannot create PDF: 'fpdf2' library not installed. Saving as .txt.")
-                                final_save_path = os.path.splitext(final_save_path)[0] + ".txt"
-                                with open(final_save_path, 'w', encoding='utf-8') as f: f.write(cleaned_text)
-                        
+                                common_content_data['content_text_for_pdf'] = cleaned_text
+
+                            # Call the centralized function
+                            success = create_individual_pdf(
+                                post_data=common_content_data,
+                                output_filename=final_save_path,
+                                font_path=font_path,
+                                add_info_page=self.add_info_in_pdf, # <--- NEW PARAMETER
+                                logger=self.logger
+                            )
+
+                            if not success:
+                                raise Exception("PDF generation failed (check logs)")
+
+                        # --- DOCX Generation ---
                         elif file_extension == 'docx':
                             if Document:
                                 self.logger(f"   Converting to DOCX...")
                                 document = Document()
+                                # Add simple header info if desired, or keep pure text
+                                if self.add_info_in_pdf: 
+                                    document.add_heading(post_title, 0)
+                                    document.add_paragraph(f"Date: {common_content_data['published']}")
+                                    document.add_paragraph(f"Creator: {common_content_data['creator_name']}")
+                                    document.add_paragraph(f"URL: {common_content_data['original_link']}")
+                                    document.add_page_break()
+
                                 document.add_paragraph(cleaned_text)
                                 document.save(final_save_path)
                             else:
@@ -1452,9 +1555,20 @@ class PostProcessorWorker:
                                 final_save_path = os.path.splitext(final_save_path)[0] + ".txt"
                                 with open(final_save_path, 'w', encoding='utf-8') as f: f.write(cleaned_text)
                         
-                        else: # TXT file
+                        # --- TXT Generation ---
+                        else: 
+                            content_to_write = cleaned_text
+                            # Optional: Add simple text header if "Add Info" is checked
+                            if self.add_info_in_pdf:
+                                header = (f"Title: {post_title}\n"
+                                          f"Date: {common_content_data['published']}\n"
+                                          f"Creator: {common_content_data['creator_name']}\n"
+                                          f"URL: {common_content_data['original_link']}\n"
+                                          f"{'-'*40}\n\n")
+                                content_to_write = header + cleaned_text
+
                             with open(final_save_path, 'w', encoding='utf-8') as f:
-                                f.write(cleaned_text)
+                                f.write(content_to_write)
                         
                         self.logger(f"✅ Saved Text: '{os.path.basename(final_save_path)}' in '{os.path.basename(determined_post_save_path_for_history)}'")
                         result_tuple = (1, num_potential_files_in_post, [], [], [], history_data_for_this_post, None)
@@ -1466,6 +1580,7 @@ class PostProcessorWorker:
                         result_tuple = (0, num_potential_files_in_post, [], [], [], None, None)
                         self._emit_signal('worker_finished', result_tuple)
                         return result_tuple
+
 
             if not self.extract_links_only and self.manga_mode_active and current_character_filters and (self.char_filter_scope == CHAR_SCOPE_TITLE or self.char_filter_scope == CHAR_SCOPE_BOTH) and not post_is_candidate_by_title_char_match:
                  self.logger(f"   -> Skip Post (Renaming Mode with Title/Both Scope - No Title Char Match): Title '{post_title[:50]}' doesn't match filters.")

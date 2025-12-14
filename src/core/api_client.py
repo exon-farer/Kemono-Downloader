@@ -23,7 +23,7 @@ def fetch_posts_paginated(api_url_base, headers, offset, logger, cancellation_ev
                 raise RuntimeError("Fetch operation cancelled by user while paused.")
             time.sleep(0.5)
         logger("   Post fetching resumed.")
-    fields_to_request = "id,user,service,title,shared_file,added,published,edited,file,attachments,tags"
+    fields_to_request = "id,user,service,title,shared_file,added,published,edited,file,attachments,tags,content"
     paginated_url = f'{api_url_base}?o={offset}&fields={fields_to_request}'
     
     max_retries = 3
@@ -39,10 +39,10 @@ def fetch_posts_paginated(api_url_base, headers, offset, logger, cancellation_ev
         logger(log_message)
 
         try:
-            response = requests.get(paginated_url, headers=headers, timeout=(15, 60), cookies=cookies_dict)
-            response.raise_for_status()
-            response.encoding = 'utf-8'  
-            return response.json()
+            with requests.get(paginated_url, headers=headers, timeout=(15, 60), cookies=cookies_dict) as response:
+                response.raise_for_status()
+                response.encoding = 'utf-8'  
+                return response.json()
 
         except requests.exceptions.RequestException as e:
             # Handle 403 error on the FIRST page as a rate limit/block
@@ -87,9 +87,10 @@ def fetch_single_post_data(api_domain, service, user_id, post_id, headers, logge
     post_api_url = f"https://{api_domain}/api/v1/{service}/user/{user_id}/post/{post_id}"
     logger(f"      Fetching full content for post ID {post_id}...")
 
-    scraper = cloudscraper.create_scraper()
-
+    # FIX: Ensure scraper session is closed after use
+    scraper = None
     try:
+        scraper = cloudscraper.create_scraper()
         response = scraper.get(post_api_url, headers=headers, timeout=(15, 300), cookies=cookies_dict)
         response.raise_for_status()
 
@@ -104,6 +105,10 @@ def fetch_single_post_data(api_domain, service, user_id, post_id, headers, logge
     except Exception as e:
         logger(f"      ❌ Failed to fetch full content for post {post_id}: {e}")
         return None
+    finally:
+        # CRITICAL FIX: Close the scraper session to free file descriptors and memory
+        if scraper:
+            scraper.close()
 
         
 def fetch_post_comments(api_domain, service, user_id, post_id, headers, logger, cancellation_event=None, pause_event=None, cookies_dict=None):
@@ -115,10 +120,11 @@ def fetch_post_comments(api_domain, service, user_id, post_id, headers, logger, 
     logger(f"   Fetching comments: {comments_api_url}")
     
     try:
-        response = requests.get(comments_api_url, headers=headers, timeout=(10, 30), cookies=cookies_dict)
-        response.raise_for_status()
-        response.encoding = 'utf-8'          
-        return response.json()
+        # FIX: Use context manager
+        with requests.get(comments_api_url, headers=headers, timeout=(10, 30), cookies=cookies_dict) as response:
+            response.raise_for_status()
+            response.encoding = 'utf-8'          
+            return response.json()
     except requests.exceptions.RequestException as e:
         raise RuntimeError(f"Error fetching comments for post {post_id}: {e}")
     except ValueError as e:
@@ -174,10 +180,12 @@ def download_from_api(
         direct_post_api_url = f"https://{api_domain}/api/v1/{service}/user/{user_id}/post/{target_post_id}"
         logger(f"   Attempting direct fetch for target post: {direct_post_api_url}")
         try:
-            direct_response = requests.get(direct_post_api_url, headers=headers, timeout=(10, 30), cookies=cookies_for_api)
-            direct_response.raise_for_status()
-            direct_response.encoding = 'utf-8' 
-            direct_post_data = direct_response.json()
+            # FIX: Use context manager
+            with requests.get(direct_post_api_url, headers=headers, timeout=(10, 30), cookies=cookies_for_api) as direct_response:
+                direct_response.raise_for_status()
+                direct_response.encoding = 'utf-8' 
+                direct_post_data = direct_response.json()
+            
             if isinstance(direct_post_data, list) and direct_post_data:
                 direct_post_data = direct_post_data[0]
             if isinstance(direct_post_data, dict) and 'post' in direct_post_data and isinstance(direct_post_data['post'], dict):
@@ -311,7 +319,6 @@ def download_from_api(
         current_page_num = start_page
         logger(f"   Starting from page {current_page_num} (calculated offset {current_offset}).")
     
-    # --- START OF MODIFIED BLOCK ---
     while True:
         if pause_event and pause_event.is_set():
             logger("   Post fetching loop paused...")
@@ -334,7 +341,6 @@ def download_from_api(
             break
             
         try:
-            # 1. Fetch the raw batch of posts
             raw_posts_batch = fetch_posts_paginated(api_base_url, headers, current_offset, logger, cancellation_event, pause_event, cookies_dict=cookies_for_api)
             if not isinstance(raw_posts_batch, list):
                 logger(f"❌ API Error: Expected list of posts, got {type(raw_posts_batch)} at page {current_page_num} (offset {current_offset}).")
@@ -350,7 +356,6 @@ def download_from_api(
             traceback.print_exc()
             break
 
-        # 2. Check if the *raw* batch from the API was empty. This is the correct "end" condition.
         if not raw_posts_batch:
             if target_post_id and not processed_target_post_flag:
                 logger(f"❌ Target post {target_post_id} not found after checking all available pages (API returned no more posts at offset {current_offset}).")
@@ -359,9 +364,8 @@ def download_from_api(
                     logger(f"😕 No posts found on the first page checked (page {current_page_num}, offset {current_offset}).")
                 else:
                     logger(f"✅ Reached end of posts (no more content from API at offset {current_offset}).")
-            break # This break is now correct.
+            break
 
-        # 3. Filter the batch against processed IDs
         posts_batch_to_yield = raw_posts_batch
         original_count = len(raw_posts_batch)
         
@@ -371,25 +375,17 @@ def download_from_api(
             if skipped_count > 0:
                 logger(f"   Skipped {skipped_count} already processed post(s) from page {current_page_num}.")
 
-        # 4. Process the *filtered* batch
         if target_post_id and not processed_target_post_flag:
-            # Still searching for a specific post
             matching_post = next((p for p in posts_batch_to_yield if str(p.get('id')) == str(target_post_id)), None)
             if matching_post:
                 logger(f"🎯 Found target post {target_post_id} on page {current_page_num} (offset {current_offset}).")
                 yield [matching_post]
                 processed_target_post_flag = True
         elif not target_post_id:
-            # Downloading a creator feed
             if posts_batch_to_yield:
-                # We found new posts on this page, yield them
                 yield posts_batch_to_yield
             elif original_count > 0:
-                # We found 0 new posts, but the page *did* have posts (they were just skipped).
-                # Log this and continue to the next page.
                 logger(f"   No new posts found on page {current_page_num}. Checking next page...")
-            # If original_count was 0, the `if not raw_posts_batch:` check
-            # already caught it and broke the loop.
 
         if processed_target_post_flag:
             break
@@ -397,7 +393,6 @@ def download_from_api(
         current_offset += page_size
         current_page_num += 1
         time.sleep(0.6)
-    # --- END OF MODIFIED BLOCK ---
         
     if target_post_id and not processed_target_post_flag and not (cancellation_event and cancellation_event.is_set()):
         logger(f"❌ Target post {target_post_id} could not be found after checking all relevant pages (final check after loop).")
