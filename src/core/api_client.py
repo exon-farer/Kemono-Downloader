@@ -6,7 +6,9 @@ import requests
 import cloudscraper 
 from ..utils.network_utils import extract_post_info, prepare_cookies_for_request
 from ..config.constants import (
-    STYLE_DATE_POST_TITLE
+    STYLE_DATE_POST_TITLE,
+    STYLE_DATE_BASED,
+    STYLE_POST_TITLE_GLOBAL_NUMBERING
 )
 
 
@@ -81,7 +83,6 @@ def fetch_posts_paginated(api_url_base, headers, offset, logger, cancellation_ev
 
 def fetch_single_post_data(api_domain, service, user_id, post_id, headers, logger, cookies_dict=None):
     """
-    --- MODIFIED FUNCTION ---
     Fetches the full data, including the 'content' field, for a single post using cloudscraper.
     """
     post_api_url = f"https://{api_domain}/api/v1/{service}/user/{user_id}/post/{post_id}"
@@ -106,7 +107,6 @@ def fetch_single_post_data(api_domain, service, user_id, post_id, headers, logge
         logger(f"      ❌ Failed to fetch full content for post {post_id}: {e}")
         return None
     finally:
-        # CRITICAL FIX: Close the scraper session to free file descriptors and memory
         if scraper:
             scraper.close()
 
@@ -120,7 +120,6 @@ def fetch_post_comments(api_domain, service, user_id, post_id, headers, logger, 
     logger(f"   Fetching comments: {comments_api_url}")
     
     try:
-        # FIX: Use context manager
         with requests.get(comments_api_url, headers=headers, timeout=(10, 30), cookies=cookies_dict) as response:
             response.raise_for_status()
             response.encoding = 'utf-8'          
@@ -180,7 +179,6 @@ def download_from_api(
         direct_post_api_url = f"https://{api_domain}/api/v1/{service}/user/{user_id}/post/{target_post_id}"
         logger(f"   Attempting direct fetch for target post: {direct_post_api_url}")
         try:
-            # FIX: Use context manager
             with requests.get(direct_post_api_url, headers=headers, timeout=(10, 30), cookies=cookies_for_api) as direct_response:
                 direct_response.raise_for_status()
                 direct_response.encoding = 'utf-8' 
@@ -208,12 +206,23 @@ def download_from_api(
     if target_post_id and (start_page or end_page):
         logger("⚠️ Page range (start/end page) is ignored when a specific post URL is provided (searching all pages for the post).")
 
-    is_manga_mode_fetch_all_and_sort_oldest_first = manga_mode and (manga_filename_style_for_sort_check != STYLE_DATE_POST_TITLE) and not target_post_id
+    # --- FIXED LOGIC HERE ---
+    # Define which styles require fetching ALL posts first (Sequential Mode)
+    styles_requiring_fetch_all = [STYLE_DATE_BASED, STYLE_POST_TITLE_GLOBAL_NUMBERING]
+
+    # Only enable "fetch all and sort" if the current style is explicitly in the list above
+    is_manga_mode_fetch_all_and_sort_oldest_first = (
+        manga_mode and 
+        (manga_filename_style_for_sort_check in styles_requiring_fetch_all) and 
+        not target_post_id
+    )
+
     should_fetch_all = fetch_all_first or is_manga_mode_fetch_all_and_sort_oldest_first  
     api_base_url = f"https://{api_domain}/api/v1/{service}/user/{user_id}/posts"
     page_size = 50
+    
     if is_manga_mode_fetch_all_and_sort_oldest_first:
-        logger(f"   Manga Mode (Style: {manga_filename_style_for_sort_check if manga_filename_style_for_sort_check else 'Default'} - Oldest First Sort Active): Fetching all posts to sort by date...")
+        logger(f"   Manga Mode (Style: {manga_filename_style_for_sort_check} - Oldest First Sort Active): Fetching all posts to sort by date...")
         all_posts_for_manga_mode = []
         current_offset_manga = 0
         if start_page and start_page > 1:
@@ -308,8 +317,9 @@ def download_from_api(
                 yield all_posts_for_manga_mode[i:i + page_size]
         return
 
-    if manga_mode and not target_post_id and (manga_filename_style_for_sort_check == STYLE_DATE_POST_TITLE):
-        logger(f"   Manga Mode (Style: {STYLE_DATE_POST_TITLE}): Processing posts in default API order (newest first).")
+    # Log specific message for styles that are in Manga Mode but NOT sorting (Streaming)
+    if manga_mode and not target_post_id and (manga_filename_style_for_sort_check not in styles_requiring_fetch_all):
+        logger(f"   Renaming Mode (Style: {manga_filename_style_for_sort_check}): Processing posts in default API order (Streaming).")
 
     current_page_num = 1
     current_offset = 0
