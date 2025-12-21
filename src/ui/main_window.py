@@ -1,6 +1,7 @@
 import sys
 import os
 import time
+import glob
 import queue
 import random 
 import traceback
@@ -164,7 +165,7 @@ class DownloaderApp (QWidget ):
         self.is_finishing = False 
         self.finish_lock = threading.Lock() 
         self.add_info_in_pdf_setting = False
-        
+
         saved_res = self.settings.value(RESOLUTION_KEY, "Auto")
         if saved_res != "Auto":
             try:
@@ -186,6 +187,11 @@ class DownloaderApp (QWidget ):
         os.makedirs(user_data_path, exist_ok=True)
 
         self.user_data_path = user_data_path 
+
+        self.jobs_dir = os.path.join(self.user_data_path, "jobs")
+        os.makedirs(self.jobs_dir, exist_ok=True)
+        self.is_running_job_queue = False
+        self.current_job_file = None
 
         self.config_file = os.path.join(user_data_path, "Known.txt")
         self.session_file_path = os.path.join(user_data_path, "session.json")
@@ -356,6 +362,178 @@ class DownloaderApp (QWidget ):
         self._update_button_states_and_connections()
         self._check_for_interrupted_session()
         self._cleanup_after_update() 
+
+    def add_current_settings_to_queue(self):
+        """Saves the current UI settings as a JSON job file with creator-specific paths."""
+        
+        # --- Helper: Append Name to Path safely ---
+        def get_creator_specific_path(base_dir, folder_name):
+            if not folder_name: 
+                return base_dir
+            safe_name = clean_folder_name(folder_name)
+            # Avoid double pathing (e.g. if base is .../Artist and we append /Artist again)
+            if base_dir.replace('\\', '/').rstrip('/').endswith(safe_name):
+                return base_dir
+            return os.path.join(base_dir, safe_name)
+        # ------------------------------------------
+
+        # --- SCENARIO 1: Items from Creator Selection (Popup) ---
+        if self.favorite_download_queue:
+            count = 0
+            base_settings = self._get_current_ui_settings_as_dict()
+            items_to_process = list(self.favorite_download_queue)
+            
+            for item in items_to_process:
+                real_url = item.get('url')
+                name = item.get('name', 'Unknown')
+                
+                if not real_url: continue
+
+                job_settings = base_settings.copy()
+                job_settings['api_url'] = real_url 
+                
+                # Use the name provided by the selection popup
+                job_settings['output_dir'] = get_creator_specific_path(job_settings['output_dir'], name)
+
+                if self._save_single_job_file(job_settings, name_hint=name):
+                    count += 1
+            
+            if count > 0:
+                self.log_signal.emit(f"✅ Added {count} jobs to queue from selection.")
+                self.link_input.clear()
+                self.favorite_download_queue.clear()
+                QMessageBox.information(self, "Queue", f"{count} jobs successfully added to queue!")
+            else:
+                QMessageBox.warning(self, "Queue Error", "Failed to add selected items to queue.")
+            return
+
+        # --- SCENARIO 2: Manual URL Entry ---
+        url = self.link_input.text().strip()
+        if not url:
+            QMessageBox.warning(self, "Input Error", "Cannot add to queue: URL is empty.")
+            return
+
+        settings = self._get_current_ui_settings_as_dict()
+        settings['api_url'] = url 
+        
+        # Attempt to resolve name from URL + Cache (creators.json)
+        service, user_id, post_id = extract_post_info(url)
+        name_hint = "Job"
+        
+        if service and user_id:
+            # Try to find name in your local creators cache
+            cache_key = (service.lower(), str(user_id))
+            cached_name = self.creator_name_cache.get(cache_key)
+            
+            if cached_name:
+                # CASE A: Creator Found -> Use Creator Name
+                name_hint = cached_name
+                settings['output_dir'] = get_creator_specific_path(settings['output_dir'], cached_name)
+            else:
+                # CASE B: Creator NOT Found -> Use Post ID or User ID
+                # If it's a single post link, 'post_id' will have a value.
+                # If it's a profile link, 'post_id' is None, so we use 'user_id'.
+                if post_id:
+                    folder_name = str(post_id)
+                else:
+                    folder_name = str(user_id)
+                
+                name_hint = folder_name
+                settings['output_dir'] = get_creator_specific_path(settings['output_dir'], folder_name)
+
+        if self._save_single_job_file(settings, name_hint=name_hint):
+            self.log_signal.emit(f"✅ Job added to queue: {url}")
+            self.link_input.clear()
+            QMessageBox.information(self, "Queue", "Job successfully added to queue!")
+
+    def _save_single_job_file(self, settings_dict, name_hint="job"):
+        """Helper to write a single JSON job file to the jobs directory."""
+        import uuid
+        timestamp = int(time.time())
+        unique_id = uuid.uuid4().hex[:6]
+        
+        # Clean the name hint to be safe for filenames
+        safe_name = "".join(c for c in name_hint if c.isalnum() or c in (' ', '_', '-')).strip()
+        if not safe_name: 
+            safe_name = "job"
+        
+        filename = f"job_{timestamp}_{safe_name}_{unique_id}.json"
+        filepath = os.path.join(self.jobs_dir, filename)
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(settings_dict, f, indent=2)
+            return True
+        except Exception as e:
+            self.log_signal.emit(f"❌ Failed to save job file '{filename}': {e}")
+            return False
+
+    def execute_job_queue(self):
+        """Starts the queue processing loop."""
+        job_files = sorted(glob.glob(os.path.join(self.jobs_dir, "job_*.json")))
+        
+        if not job_files:
+            QMessageBox.information(self, "Queue Empty", "No job files found in appdata/jobs.")
+            return
+
+        self.log_signal.emit("=" * 40)
+        self.log_signal.emit(f"🚀 Starting execution of {len(job_files)} queued jobs.")
+        self.is_running_job_queue = True
+        self.download_btn.setEnabled(False) # Disable button while running
+        self.add_queue_btn.setEnabled(False)
+        
+        self._process_next_queued_job()
+
+    def _process_next_queued_job(self):
+        """Loads the next job file and starts the download."""
+        if self.cancellation_event.is_set():
+            self.is_running_job_queue = False
+            self.log_signal.emit("🛑 Queue execution cancelled.")
+            self._update_button_states_and_connections()
+            return
+
+        job_files = sorted(glob.glob(os.path.join(self.jobs_dir, "job_*.json")))
+        
+        if not job_files:
+            self.is_running_job_queue = False
+            self.current_job_file = None
+            self.log_signal.emit("🏁 All queued jobs finished!")
+            self.link_input.clear()
+            QMessageBox.information(self, "Queue Finished", "All queued jobs have been processed.")
+            self._update_button_states_and_connections()
+            return
+
+        next_job_path = job_files[0]
+        self.current_job_file = next_job_path
+        
+        self.log_signal.emit(f"📂 Loading job: {os.path.basename(next_job_path)}")
+        
+        try:
+            with open(next_job_path, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+            
+            # --- Ensure Directory Exists ---
+            # The settings now contain the full path (e.g. E:/Kemono/ArtistName)
+            target_dir = settings.get('output_dir', '')
+            if target_dir:
+                try:
+                    os.makedirs(target_dir, exist_ok=True)
+                except Exception as e:
+                    self.log_signal.emit(f"⚠️ Warning: Could not pre-create directory '{target_dir}': {e}")
+            # -------------------------------
+
+            # Load settings into UI
+            self._load_ui_from_settings_dict(settings)
+            QCoreApplication.processEvents()
+            
+            # Start download
+            self.start_download()
+            
+        except Exception as e:
+            self.log_signal.emit(f"❌ Error loading/starting job '{next_job_path}': {e}")
+            failed_path = next_job_path + ".failed"
+            os.rename(next_job_path, failed_path)
+            self._process_next_queued_job()
 
     def _run_discord_file_download_thread(self, session, server_id, channel_id, token, output_dir, message_limit=None):
         """
@@ -769,6 +947,23 @@ class DownloaderApp (QWidget ):
 
         is_download_active = self._is_download_active()
         fetch_first_enabled = self.settings.value(FETCH_FIRST_KEY, False, type=bool)
+        url_text = self.link_input.text().strip()
+        
+        # --- NEW: Check for Queue Command ---
+        is_queue_command = (url_text.lower() == "start queue")
+        
+        # --- NEW: Handle 'Add to Queue' Button State ---
+        if hasattr(self, 'add_queue_btn'):
+            # Only enable if not downloading, URL is valid, not in queue mode, and not in specialized fetch states
+            should_enable_queue = (
+                not is_download_active and 
+                url_text != "" and 
+                not is_queue_command and
+                not self.is_ready_to_download_fetched and 
+                not self.is_ready_to_download_batch_update
+            )
+            self.add_queue_btn.setEnabled(should_enable_queue)
+
         print(f"--- DEBUG: Updating buttons (is_download_active={is_download_active}) ---")
 
         if self.is_ready_to_download_fetched:
@@ -852,7 +1047,12 @@ class DownloaderApp (QWidget ):
                     self.download_btn.setText(f"⬇️ Start Download ({num_posts} Posts)")
                     self.download_btn.setEnabled(True) # Keep it enabled for the user to click
                 else:
-                    self.download_btn.setText(self._tr("start_download_button_text", "⬇️ Start Download"))
+                    # Check if running queue to show specific text
+                    if hasattr(self, 'is_running_job_queue') and self.is_running_job_queue:
+                         self.download_btn.setText("🔄 Processing Queue...")
+                    else:
+                         self.download_btn.setText(self._tr("start_download_button_text", "⬇️ Start Download"))
+                    
                     self.download_btn.setEnabled(False)
                 
                 self.pause_btn.setText(self._tr("resume_download_button_text", "▶️ Resume Download") if self.is_paused else self._tr("pause_download_button_text", "⏸️ Pause Download"))
@@ -865,22 +1065,32 @@ class DownloaderApp (QWidget ):
             self.cancel_btn.clicked.connect(self.cancel_download_button_action)
         
         else:
-            url_text = self.link_input.text().strip()
-            _, _, post_id = extract_post_info(url_text)
-            is_single_post = bool(post_id)
-
-            if fetch_first_enabled and not is_single_post:
-                self.download_btn.setText("📄 Fetch Pages")
+            # --- IDLE STATE ---
+            if is_queue_command:
+                # --- NEW: Queue Execution Mode ---
+                self.download_btn.setText("🚀 Execute Queue")
+                self.download_btn.setEnabled(True)
+                # Ensure the method exists before connecting
+                if hasattr(self, 'execute_job_queue'):
+                    self.download_btn.clicked.connect(self.execute_job_queue)
             else:
-                self.download_btn.setText(self._tr("start_download_button_text", "⬇️ Start Download"))
-            
-            self.download_btn.setEnabled(True)
-            self.download_btn.clicked.connect(self.start_download)
+                _, _, post_id = extract_post_info(url_text)
+                is_single_post = bool(post_id)
+
+                if fetch_first_enabled and not is_single_post and url_text:
+                    self.download_btn.setText("📄 Fetch Pages")
+                else:
+                    self.download_btn.setText(self._tr("start_download_button_text", "⬇️ Start Download"))
+                
+                self.download_btn.setEnabled(True)
+                self.download_btn.clicked.connect(self.start_download)
+
             self.pause_btn.setText(self._tr("pause_download_button_text", "⏸️ Pause Download"))
             self.pause_btn.setEnabled(False)
             self.cancel_btn.setText(self._tr("cancel_button_text", "❌ Cancel & Reset UI"))
             self.cancel_btn.setEnabled(False)
 
+        
     def _run_fetch_only_thread(self, fetch_args):
         """
         Runs in a background thread to ONLY fetch all posts without downloading.
@@ -5743,6 +5953,14 @@ class DownloaderApp (QWidget ):
 
             if cancelled_by_user:
                 self.log_signal.emit("✅ Cancellation complete. Resetting UI.")
+                
+                # --- NEW: Reset Queue State on Cancel ---
+                if getattr(self, 'is_running_job_queue', False):
+                    self.log_signal.emit("🛑 Queue execution stopped by user.")
+                    self.is_running_job_queue = False
+                    self.current_job_file = None
+                # ----------------------------------------
+
                 self._clear_session_file()
                 self.interrupted_session_data = None
                 self.is_restore_pending = False
@@ -5757,7 +5975,7 @@ class DownloaderApp (QWidget ):
 
             self.log_signal.emit("🏁 Download of current item complete.")
 
-            # --- QUEUE PROCESSING BLOCK ---
+            # --- EXISTING: FAVORITE QUEUE PROCESSING BLOCK ---
             if self.is_processing_favorites_queue and self.favorite_download_queue:
                 self.log_signal.emit("✅ Item finished. Processing next in queue...")
                 if self.download_thread and isinstance(self.download_thread, QThread):
@@ -5772,6 +5990,39 @@ class DownloaderApp (QWidget ):
                 self._process_next_favorite_download()
                 return  
             # ---------------------------------------------------------
+
+            # --- NEW: JOB QUEUE CONTINUATION LOGIC ---
+            # Checks if we are in 'Execute Queue' mode and have a current job file active
+            if getattr(self, 'is_running_job_queue', False) and getattr(self, 'current_job_file', None):
+                self.log_signal.emit(f"✅ Job finished. Deleting job file: {os.path.basename(self.current_job_file)}")
+                
+                # 1. Clean up resources for this specific run
+                self._finalize_download_history()
+                if self.thread_pool:
+                    self.thread_pool.shutdown(wait=False)
+                    self.thread_pool = None
+                self._cleanup_temp_files()
+                self.single_pdf_setting = False # Reset per job
+
+                # 2. Delete the finished job file so it isn't run again
+                try:
+                    if os.path.exists(self.current_job_file):
+                        os.remove(self.current_job_file)
+                except Exception as e:
+                    self.log_signal.emit(f"⚠️ Failed to delete finished job file: {e}")
+
+                # 3. Reset state for next job
+                self.current_job_file = None
+                self.is_finishing = False 
+                
+                # 4. Release lock
+                self.finish_lock.release()
+                lock_held = False
+                
+                # 5. Trigger next job in queue (using QTimer to allow stack to unwind)
+                QTimer.singleShot(100, self._process_next_queued_job)
+                return
+            # -----------------------------------------
 
             if self.is_processing_favorites_queue:
                 self.is_processing_favorites_queue = False
@@ -5888,12 +6139,21 @@ class DownloaderApp (QWidget ):
                 
                 # Reset the finishing lock and exit to let the retry session take over
                 self.is_finishing = False 
+                
+                # Release lock here as we are returning
+                self.finish_lock.release()
+                lock_held = False
                 return 
 
             self.is_fetcher_thread_running = False
             
+            # --- POST DOWNLOAD ACTION (Only if queue is finished or not running queue) ---
             if not cancelled_by_user and not self.is_processing_favorites_queue:
-                self._execute_post_download_action()
+                # If we were running a job queue, we only do this when the queue is EMPTY (handled by _process_next_queued_job)
+                # But since we return early for job queue continuation above, getting here means
+                # we are either in a standard download OR the job queue has finished/was cancelled.
+                if not getattr(self, 'is_running_job_queue', False):
+                    self._execute_post_download_action()
 
             self.set_ui_enabled(True)
             self._update_button_states_and_connections()
