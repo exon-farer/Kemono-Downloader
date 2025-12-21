@@ -347,7 +347,6 @@ def setup_ui(main_app):
     left_layout.addLayout(checkboxes_group_layout)
 
     # --- Action Buttons & Remaining UI ---
-    # ... (The rest of the setup_ui function remains unchanged)
     main_app.standard_action_buttons_widget = QWidget()
     btn_layout = QHBoxLayout(main_app.standard_action_buttons_widget)
     btn_layout.setContentsMargins(0, 10, 0, 0)
@@ -357,6 +356,11 @@ def setup_ui(main_app):
     font.setBold(True)
     main_app.download_btn.setFont(font)
     main_app.download_btn.clicked.connect(main_app.start_download)
+
+    main_app.add_queue_btn = QPushButton("➕ Add to Queue")
+    main_app.add_queue_btn.setToolTip("Save current settings as a job for later execution.")
+    main_app.add_queue_btn.clicked.connect(main_app.add_current_settings_to_queue)
+
     main_app.pause_btn = QPushButton("⏸️ Pause Download")
     main_app.pause_btn.setEnabled(False)
     main_app.pause_btn.clicked.connect(main_app._handle_pause_resume_action)
@@ -367,6 +371,7 @@ def setup_ui(main_app):
     main_app.error_btn.setToolTip("View files skipped due to errors and optionally retry them.")
     main_app.error_btn.setEnabled(True)
     btn_layout.addWidget(main_app.download_btn)
+    btn_layout.addWidget(main_app.add_queue_btn) 
     btn_layout.addWidget(main_app.pause_btn)
     btn_layout.addWidget(main_app.cancel_btn)
     btn_layout.addWidget(main_app.error_btn)
