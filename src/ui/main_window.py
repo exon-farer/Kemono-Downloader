@@ -476,6 +476,11 @@ class DownloaderApp (QWidget ):
             QMessageBox.information(self, "Queue Empty", "No job files found in appdata/jobs.")
             return
 
+        # --- FIX: Clear error log at the start of the entire queue session ---
+        self.permanently_failed_files_for_dialog.clear()
+        self._update_error_button_count()
+        # -------------------------------------------------------------------
+
         self.log_signal.emit("=" * 40)
         self.log_signal.emit(f"🚀 Starting execution of {len(job_files)} queued jobs.")
         self.is_running_job_queue = True
@@ -4036,6 +4041,10 @@ class DownloaderApp (QWidget ):
         self.downloaded_hash_counts.clear()
 
         if not is_restore and not is_continuation:
+
+            if not self.is_running_job_queue:
+                self.permanently_failed_files_for_dialog.clear()
+
             self.permanently_failed_files_for_dialog.clear()
 
         self.retryable_failed_files_info.clear()
@@ -5942,9 +5951,7 @@ class DownloaderApp (QWidget ):
         if not self.finish_lock.acquire(blocking=False):
             return
 
-        # --- Flag to track if we still hold the lock ---
         lock_held = True 
-        # ----------------------------------------------------
 
         try:
             if self.is_finishing:
@@ -5983,20 +5990,21 @@ class DownloaderApp (QWidget ):
                 self.download_thread = None 
                 self.is_finishing = False 
 
-                # FIX: Manual release + update flag
                 self.finish_lock.release()
                 lock_held = False 
                 
                 self._process_next_favorite_download()
                 return  
-            # ---------------------------------------------------------
 
-            # --- NEW: JOB QUEUE CONTINUATION LOGIC ---
-            # Checks if we are in 'Execute Queue' mode and have a current job file active
             if getattr(self, 'is_running_job_queue', False) and getattr(self, 'current_job_file', None):
                 self.log_signal.emit(f"✅ Job finished. Deleting job file: {os.path.basename(self.current_job_file)}")
                 
-                # 1. Clean up resources for this specific run
+                if self.retryable_failed_files_info:
+                    self.log_signal.emit(f"⚠️ Job had {len(self.retryable_failed_files_info)} incomplete files. Adding to cumulative error report.")
+                    self.permanently_failed_files_for_dialog.extend(self.retryable_failed_files_info)
+                    self._update_error_button_count()
+                    self.retryable_failed_files_info.clear()
+
                 self._finalize_download_history()
                 if self.thread_pool:
                     self.thread_pool.shutdown(wait=False)
@@ -6022,7 +6030,6 @@ class DownloaderApp (QWidget ):
                 # 5. Trigger next job in queue (using QTimer to allow stack to unwind)
                 QTimer.singleShot(100, self._process_next_queued_job)
                 return
-            # -----------------------------------------
 
             if self.is_processing_favorites_queue:
                 self.is_processing_favorites_queue = False
