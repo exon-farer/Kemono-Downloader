@@ -67,9 +67,7 @@ class DeviantArtClient:
         while True:
             try:
                 resp = self.session.get(url, params=params, timeout=20)
-                
-                # --- Handle Status Codes ---
-                
+                                
                 # 429: Rate Limit (Retry infinitely like 1.py)
                 if resp.status_code == 429:
                     retry_after = resp.headers.get('Retry-After')
@@ -91,26 +89,20 @@ class DeviantArtClient:
                     else:
                         raise Exception("Failed to refresh token")
 
-                # 400, 403, 404: Client Errors (DO NOT RETRY)
-                # These mean the file doesn't exist or isn't downloadable via this endpoint.
                 if 400 <= resp.status_code < 500:
                     resp.raise_for_status() # This raises immediately, breaking the loop
 
-                # 5xx: Server Errors (Retry)
                 if 500 <= resp.status_code < 600:
-                    resp.raise_for_status() # Will be caught by except block below for retry
+                    resp.raise_for_status() 
 
                 resp.raise_for_status()
                 
-                # Success - Clear logs
                 with self.log_lock:
                     self.logged_waits.clear()
                         
                 return resp.json()
 
             except requests.exceptions.HTTPError as e:
-                # If it's a 4xx error (caught above), re-raise it immediately 
-                # so get_deviation_content can switch to fallback logic.
                 if e.response is not None and 400 <= e.response.status_code < 500:
                     raise e
                 
