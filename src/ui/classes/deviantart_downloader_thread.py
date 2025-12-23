@@ -21,8 +21,7 @@ class DeviantArtDownloadThread(QThread):
         self.pause_event = pause_event
         self.cancellation_event = cancellation_event
         
-        # --- PASS LOGGER TO CLIENT ---
-        # This ensures client logs go to the UI, not just the black console window
+        # Pass logger to client so we see "Rate Limit" messages in the UI
         self.client = DeviantArtClient(logger_func=self.progress_signal.emit)
         
         self.parent_app = parent 
@@ -30,12 +29,13 @@ class DeviantArtDownloadThread(QThread):
         self.skip_count = 0
         
         # --- THREAD SETTINGS ---
-        self.max_threads = 10 
+        # STRICTLY 1 THREAD (Sequential) to match 1.py and avoid Rate Limits
+        self.max_threads = 1 
 
     def run(self):
         self.progress_signal.emit("=" * 40)
         self.progress_signal.emit(f"🚀 Starting DeviantArt download for: {self.url}")
-        self.progress_signal.emit(f"   ℹ️ Using {self.max_threads} parallel threads.")
+        self.progress_signal.emit(f"   ℹ️ Mode: Sequential (1 thread) to prevent 429 errors.")
         
         try:
             if not self.client.authenticate():
@@ -108,8 +108,10 @@ class DeviantArtDownloadThread(QThread):
                     future = executor.submit(self._process_deviation_task, deviation, base_folder)
                     futures.append(future)
 
+                # Wait for this batch to finish before getting the next page
                 wait(futures)
                 
+                # Match 1.py: Sleep 1s between pages to be nice to API
                 time.sleep(1) 
 
     def _process_deviation_task(self, deviation, base_folder):
@@ -119,6 +121,7 @@ class DeviantArtDownloadThread(QThread):
         title = deviation.get('title', 'Unknown')
 
         try:
+            # This handles the fallback logic internally
             content = self.client.get_deviation_content(dev_id)
             if content:
                 self._download_file(content['src'], deviation, override_dir=base_folder)
@@ -152,6 +155,7 @@ class DeviantArtDownloadThread(QThread):
         
         final_filename = f"{safe_title}{ext}"
 
+        # Naming logic
         if self.parent_app and self.parent_app.manga_mode_checkbox.isChecked():
             try:
                 creator_name = metadata.get('author', {}).get('username', 'Unknown')
