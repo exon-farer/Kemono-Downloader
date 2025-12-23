@@ -68,6 +68,14 @@ DISCORD_TOKEN_KEY = "discord/token"
 
 POST_DOWNLOAD_ACTION_KEY = "postDownloadAction"
 
+
+# --- Proxy / Network Keys ---
+PROXY_ENABLED_KEY = "proxy/enabled"
+PROXY_HOST_KEY = "proxy/host"
+PROXY_PORT_KEY = "proxy/port"
+PROXY_USERNAME_KEY = "proxy/username"
+PROXY_PASSWORD_KEY = "proxy/password"
+
 # --- UI Constants and Identifiers ---
 HTML_PREFIX = "<!HTML!>"
 LOG_DISPLAY_LINKS = "links"
