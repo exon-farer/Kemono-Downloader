@@ -5,10 +5,11 @@ import sys
 
 # --- PyQt5 Imports ---
 from PyQt5.QtCore import Qt, QStandardPaths, QTimer
+from PyQt5.QtGui import QIntValidator  # <--- NEW: Added for Port validation
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
     QGroupBox, QComboBox, QMessageBox, QGridLayout, QCheckBox, QLineEdit,
-    QTabWidget, QWidget, QFileDialog  # Added QFileDialog
+    QTabWidget, QWidget, QFileDialog
 )
 # --- Local Application Imports ---
 from ...i18n.translator import get_translation
@@ -21,7 +22,9 @@ from ...config.constants import (
     RESOLUTION_KEY, UI_SCALE_KEY, SAVE_CREATOR_JSON_KEY,
     DATE_PREFIX_FORMAT_KEY, 
     COOKIE_TEXT_KEY, USE_COOKIE_KEY,
-    FETCH_FIRST_KEY, DISCORD_TOKEN_KEY, POST_DOWNLOAD_ACTION_KEY
+    FETCH_FIRST_KEY, DISCORD_TOKEN_KEY, POST_DOWNLOAD_ACTION_KEY,
+    PROXY_ENABLED_KEY, PROXY_HOST_KEY, PROXY_PORT_KEY, 
+    PROXY_USERNAME_KEY, PROXY_PASSWORD_KEY
 )
 from ...services.updater import UpdateChecker, UpdateDownloader
 
@@ -118,16 +121,15 @@ class FutureSettingsDialog(QDialog):
         super().__init__(parent)
         self.parent_app = parent_app_ref
         self.setModal(True)
-        self.update_downloader_thread = None # To keep a reference
+        self.update_downloader_thread = None 
 
         app_icon = get_app_icon_object()
         if app_icon and not app_icon.isNull():
             self.setWindowIcon(app_icon)
 
         screen_height = QApplication.primaryScreen().availableGeometry().height() if QApplication.primaryScreen() else 800
-        # Use a more balanced aspect ratio
         scale_factor = screen_height / 1000.0 
-        base_min_w, base_min_h = 480, 420 # Wider, less tall
+        base_min_w, base_min_h = 550, 450 # <--- TWEAK: Slightly increased width for better layout
         scaled_min_w = int(base_min_w * scale_factor)
         scaled_min_h = int(base_min_h * scale_factor)
         self.setMinimumSize(scaled_min_w, scaled_min_h)
@@ -135,6 +137,9 @@ class FutureSettingsDialog(QDialog):
         self._init_ui()
         self._retranslate_ui()
         self._apply_theme()
+        
+        # <--- NEW: Load proxy settings on init
+        self._load_proxy_settings()
 
     def _init_ui(self):
         """Initializes all UI components and layouts for the dialog."""
@@ -147,14 +152,16 @@ class FutureSettingsDialog(QDialog):
         # --- Create Tabs ---
         self.display_tab = QWidget()
         self.downloads_tab = QWidget()
+        self.network_tab = QWidget() # <--- NEW: Network Tab
         self.updates_tab = QWidget()
 
         # Add tabs to the widget
         self.tab_widget.addTab(self.display_tab, "Display")
         self.tab_widget.addTab(self.downloads_tab, "Downloads")
+        self.tab_widget.addTab(self.network_tab, "Proxy/Network") # <--- NEW
         self.tab_widget.addTab(self.updates_tab, "Updates")
 
-        # --- Populate Display Tab ---
+        # [Display Tab Code (Unchanged) ...]
         display_tab_layout = QVBoxLayout(self.display_tab)
         self.display_group_box = QGroupBox()
         display_layout = QGridLayout(self.display_group_box)
@@ -184,9 +191,9 @@ class FutureSettingsDialog(QDialog):
         display_layout.addWidget(self.resolution_combo_box, 3, 1)
         
         display_tab_layout.addWidget(self.display_group_box)
-        display_tab_layout.addStretch(1) # Push content to the top
+        display_tab_layout.addStretch(1) 
 
-        # --- Populate Downloads Tab ---
+        # [Downloads Tab Code (Unchanged) ...]
         downloads_tab_layout = QVBoxLayout(self.downloads_tab)
         self.download_settings_group_box = QGroupBox()
         download_settings_layout = QGridLayout(self.download_settings_group_box)
@@ -217,7 +224,6 @@ class FutureSettingsDialog(QDialog):
         self.fetch_first_checkbox.stateChanged.connect(self._fetch_first_setting_changed)
         download_settings_layout.addWidget(self.fetch_first_checkbox, 4, 0, 1, 2)
 
-        # --- START: Add new Load/Save buttons ---
         settings_file_layout = QHBoxLayout()
         self.load_settings_button = QPushButton()
         self.save_settings_button = QPushButton()
@@ -225,18 +231,63 @@ class FutureSettingsDialog(QDialog):
         settings_file_layout.addWidget(self.save_settings_button)
         settings_file_layout.addStretch(1)
         
-        # Add this new layout to the grid
-        download_settings_layout.addLayout(settings_file_layout, 5, 0, 1, 2) # Row 5, span 2 cols
+        download_settings_layout.addLayout(settings_file_layout, 5, 0, 1, 2)
         
-        # Connect signals
         self.load_settings_button.clicked.connect(self._handle_load_settings)
         self.save_settings_button.clicked.connect(self._handle_save_settings)
-        # --- END: Add new Load/Save buttons ---
 
         downloads_tab_layout.addWidget(self.download_settings_group_box)
-        downloads_tab_layout.addStretch(1) # Push content to the top
+        downloads_tab_layout.addStretch(1) 
 
-        # --- Populate Updates Tab ---
+        # --- START: Network Tab (NEW) ---
+        network_tab_layout = QVBoxLayout(self.network_tab)
+        self.proxy_group_box = QGroupBox()
+        proxy_layout = QGridLayout(self.proxy_group_box)
+
+        # Enable Checkbox
+        self.proxy_enabled_checkbox = QCheckBox()
+        self.proxy_enabled_checkbox.stateChanged.connect(self._proxy_setting_changed)
+        proxy_layout.addWidget(self.proxy_enabled_checkbox, 0, 0, 1, 2)
+
+        # Host / IP
+        self.proxy_host_label = QLabel()
+        self.proxy_host_input = QLineEdit()
+        self.proxy_host_input.setPlaceholderText("127.0.0.1")
+        self.proxy_host_input.editingFinished.connect(self._proxy_setting_changed)
+        proxy_layout.addWidget(self.proxy_host_label, 1, 0)
+        proxy_layout.addWidget(self.proxy_host_input, 1, 1)
+
+        # Port
+        self.proxy_port_label = QLabel()
+        self.proxy_port_input = QLineEdit()
+        self.proxy_port_input.setPlaceholderText("8080")
+        self.proxy_port_input.setValidator(QIntValidator(1, 65535, self)) # Only numbers
+        self.proxy_port_input.editingFinished.connect(self._proxy_setting_changed)
+        proxy_layout.addWidget(self.proxy_port_label, 2, 0)
+        proxy_layout.addWidget(self.proxy_port_input, 2, 1)
+
+        # Username
+        self.proxy_user_label = QLabel()
+        self.proxy_user_input = QLineEdit()
+        self.proxy_user_input.setPlaceholderText("(Optional)")
+        self.proxy_user_input.editingFinished.connect(self._proxy_setting_changed)
+        proxy_layout.addWidget(self.proxy_user_label, 3, 0)
+        proxy_layout.addWidget(self.proxy_user_input, 3, 1)
+
+        # Password
+        self.proxy_pass_label = QLabel()
+        self.proxy_pass_input = QLineEdit()
+        self.proxy_pass_input.setPlaceholderText("(Optional)")
+        self.proxy_pass_input.setEchoMode(QLineEdit.Password) # Mask input
+        self.proxy_pass_input.editingFinished.connect(self._proxy_setting_changed)
+        proxy_layout.addWidget(self.proxy_pass_label, 4, 0)
+        proxy_layout.addWidget(self.proxy_pass_input, 4, 1)
+
+        network_tab_layout.addWidget(self.proxy_group_box)
+        network_tab_layout.addStretch(1)
+        # --- END: Network Tab (NEW) ---
+
+        # [Updates Tab Code (Unchanged) ...]
         updates_tab_layout = QVBoxLayout(self.updates_tab)
         self.update_group_box = QGroupBox()
         update_layout = QGridLayout(self.update_group_box)
@@ -249,7 +300,7 @@ class FutureSettingsDialog(QDialog):
         update_layout.addWidget(self.check_update_button, 1, 0, 1, 2)
         
         updates_tab_layout.addWidget(self.update_group_box)
-        updates_tab_layout.addStretch(1) # Push content to the top
+        updates_tab_layout.addStretch(1)
 
         # --- OK Button (outside tabs) ---
         button_layout = QHBoxLayout()
@@ -266,16 +317,17 @@ class FutureSettingsDialog(QDialog):
         # --- Tab Titles ---
         self.tab_widget.setTabText(0, self._tr("settings_tab_display", "Display"))
         self.tab_widget.setTabText(1, self._tr("settings_tab_downloads", "Downloads"))
-        self.tab_widget.setTabText(2, self._tr("settings_tab_updates", "Updates"))
+        self.tab_widget.setTabText(2, self._tr("settings_tab_network", "Proxy/Network")) # <--- NEW
+        self.tab_widget.setTabText(3, self._tr("settings_tab_updates", "Updates"))
 
-        # --- Display Tab ---
+        # [Display Tab (Unchanged) ...]
         self.display_group_box.setTitle(self._tr("display_settings_group_title", "Display Settings"))
         self.theme_label.setText(self._tr("theme_label", "Theme:"))
         self.ui_scale_label.setText(self._tr("ui_scale_label", "UI Scale:"))
         self.language_label.setText(self._tr("language_label", "Language:"))
         self.window_size_label.setText(self._tr("window_size_label", "Window Size:"))
 
-        # --- Downloads Tab ---
+        # [Downloads Tab (Unchanged) ...]
         self.download_settings_group_box.setTitle(self._tr("download_settings_group_title", "Download Settings"))
         self.default_path_label.setText(self._tr("default_path_label", "Default Path:"))
         self.date_prefix_format_label.setText(self._tr("date_prefix_format_label", "Post Subfolder Format:"))
@@ -294,31 +346,92 @@ class FutureSettingsDialog(QDialog):
         self.fetch_first_checkbox.setToolTip(self._tr("fetch_first_tooltip", "If checked, the downloader will find all posts from a creator first before starting any downloads.\nThis can be slower to start but provides a more accurate progress bar."))
         self.save_path_button.setText(self._tr("settings_save_all_button", "Save Path + Cookie + Token"))
         self.save_path_button.setToolTip(self._tr("settings_save_all_tooltip", "Save the current 'Download Location', Cookie, and Discord Token settings for future sessions."))
-        
-        # --- START: Add new button text ---
         self.load_settings_button.setText(self._tr("load_settings_button", "Load Settings..."))
         self.load_settings_button.setToolTip(self._tr("load_settings_tooltip", "Load all download settings from a .json file."))
         self.save_settings_button.setText(self._tr("save_settings_button", "Save Settings..."))
         self.save_settings_button.setToolTip(self._tr("save_settings_tooltip", "Save all current download settings to a .json file."))
-        # --- END: Add new button text ---
         
-        # --- Updates Tab ---
+        # --- START: Network Tab (NEW) ---
+        self.proxy_group_box.setTitle(self._tr("proxy_settings_group_title", "Proxy Configuration"))
+        self.proxy_enabled_checkbox.setText(self._tr("proxy_enabled_label", "Enable Proxy"))
+        self.proxy_host_label.setText(self._tr("proxy_host_label", "Host / IP:"))
+        self.proxy_port_label.setText(self._tr("proxy_port_label", "Port:"))
+        self.proxy_user_label.setText(self._tr("proxy_user_label", "Username (Optional):"))
+        self.proxy_pass_label.setText(self._tr("proxy_pass_label", "Password (Optional):"))
+        # --- END: Network Tab (NEW) ---
+
+        # [Updates Tab (Unchanged) ...]
         self.update_group_box.setTitle(self._tr("update_group_title", "Application Updates"))
         current_version = self.parent_app.windowTitle().split(' v')[-1]
         self.version_label.setText(self._tr("current_version_label", f"Current Version: v{current_version}"))
         self.update_status_label.setText(self._tr("update_status_ready", "Ready to check."))
         self.check_update_button.setText(self._tr("check_for_updates_button", "Check for Updates"))
 
-        # --- General ---
         self._update_theme_toggle_button_text()
         self.ok_button.setText(self._tr("ok_button", "OK"))
         
-        # --- Load Data ---
         self._populate_display_combo_boxes()
         self._populate_language_combo_box()
         self._populate_post_download_action_combo()
         self._load_date_prefix_format()
         self._load_checkbox_states()
+
+    # --- START: New Proxy Logic ---
+    def _load_proxy_settings(self):
+        """Loads proxy settings from QSettings into the UI."""
+        self.proxy_enabled_checkbox.blockSignals(True)
+        self.proxy_host_input.blockSignals(True)
+        self.proxy_port_input.blockSignals(True)
+        self.proxy_user_input.blockSignals(True)
+        self.proxy_pass_input.blockSignals(True)
+
+        enabled = self.parent_app.settings.value(PROXY_ENABLED_KEY, False, type=bool)
+        host = self.parent_app.settings.value(PROXY_HOST_KEY, "", type=str)
+        port = self.parent_app.settings.value(PROXY_PORT_KEY, "", type=str)
+        user = self.parent_app.settings.value(PROXY_USERNAME_KEY, "", type=str)
+        password = self.parent_app.settings.value(PROXY_PASSWORD_KEY, "", type=str)
+
+        self.proxy_enabled_checkbox.setChecked(enabled)
+        self.proxy_host_input.setText(host)
+        self.proxy_port_input.setText(port)
+        self.proxy_user_input.setText(user)
+        self.proxy_pass_input.setText(password)
+
+        self._update_proxy_fields_state(enabled)
+
+        self.proxy_enabled_checkbox.blockSignals(False)
+        self.proxy_host_input.blockSignals(False)
+        self.proxy_port_input.blockSignals(False)
+        self.proxy_user_input.blockSignals(False)
+        self.proxy_pass_input.blockSignals(False)
+
+    def _proxy_setting_changed(self):
+        """Saves the current proxy UI state to QSettings."""
+        enabled = self.proxy_enabled_checkbox.isChecked()
+        host = self.proxy_host_input.text().strip()
+        port = self.proxy_port_input.text().strip()
+        user = self.proxy_user_input.text().strip()
+        password = self.proxy_pass_input.text().strip()
+
+        self.parent_app.settings.setValue(PROXY_ENABLED_KEY, enabled)
+        self.parent_app.settings.setValue(PROXY_HOST_KEY, host)
+        self.parent_app.settings.setValue(PROXY_PORT_KEY, port)
+        self.parent_app.settings.setValue(PROXY_USERNAME_KEY, user)
+        self.parent_app.settings.setValue(PROXY_PASSWORD_KEY, password)
+        self.parent_app.settings.sync()
+
+        self._update_proxy_fields_state(enabled)
+        
+        # Optional: Notify main app that network settings changed if needed
+        # self.parent_app.reload_proxy_settings() 
+
+    def _update_proxy_fields_state(self, enabled):
+        """Enables or disables input fields based on the checkbox."""
+        self.proxy_host_input.setEnabled(enabled)
+        self.proxy_port_input.setEnabled(enabled)
+        self.proxy_user_input.setEnabled(enabled)
+        self.proxy_pass_input.setEnabled(enabled)
+    # --- END: New Proxy Logic ---
 
     def _check_for_updates(self):
         self.check_update_button.setEnabled(False)
