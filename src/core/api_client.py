@@ -12,7 +12,7 @@ from ..config.constants import (
 )
 
 
-def fetch_posts_paginated(api_url_base, headers, offset, logger, cancellation_event=None, pause_event=None, cookies_dict=None):
+def fetch_posts_paginated(api_url_base, headers, offset, logger, cancellation_event=None, pause_event=None, cookies_dict=None, proxies=None):
     """
     Fetches a single page of posts from the API with robust retry logic.
     """
@@ -41,7 +41,7 @@ def fetch_posts_paginated(api_url_base, headers, offset, logger, cancellation_ev
         logger(log_message)
 
         try:
-            with requests.get(paginated_url, headers=headers, timeout=(15, 60), cookies=cookies_dict) as response:
+            with requests.get(paginated_url, headers=headers, timeout=(15, 60), cookies=cookies_dict, proxies=proxies) as response:
                 response.raise_for_status()
                 response.encoding = 'utf-8'  
                 return response.json()
@@ -81,7 +81,7 @@ def fetch_posts_paginated(api_url_base, headers, offset, logger, cancellation_ev
 
     raise RuntimeError(f"Failed to fetch page {paginated_url} after all attempts.")
 
-def fetch_single_post_data(api_domain, service, user_id, post_id, headers, logger, cookies_dict=None):
+def fetch_single_post_data(api_domain, service, user_id, post_id, headers, logger, cookies_dict=None, proxies=None):
     """
     Fetches the full data, including the 'content' field, for a single post using cloudscraper.
     """
@@ -92,7 +92,7 @@ def fetch_single_post_data(api_domain, service, user_id, post_id, headers, logge
     scraper = None
     try:
         scraper = cloudscraper.create_scraper()
-        response = scraper.get(post_api_url, headers=headers, timeout=(15, 300), cookies=cookies_dict)
+        response = scraper.get(post_api_url, headers=headers, timeout=(15, 300), cookies=cookies_dict, proxies=proxies)
         response.raise_for_status()
 
         full_post_data = response.json()
@@ -111,7 +111,7 @@ def fetch_single_post_data(api_domain, service, user_id, post_id, headers, logge
             scraper.close()
 
         
-def fetch_post_comments(api_domain, service, user_id, post_id, headers, logger, cancellation_event=None, pause_event=None, cookies_dict=None):
+def fetch_post_comments(api_domain, service, user_id, post_id, headers, logger, cancellation_event=None, pause_event=None, cookies_dict=None, proxies=None):
     """Fetches all comments for a specific post."""
     if cancellation_event and cancellation_event.is_set():
         raise RuntimeError("Comment fetch operation cancelled by user.")
@@ -120,7 +120,7 @@ def fetch_post_comments(api_domain, service, user_id, post_id, headers, logger, 
     logger(f"   Fetching comments: {comments_api_url}")
     
     try:
-        with requests.get(comments_api_url, headers=headers, timeout=(10, 30), cookies=cookies_dict) as response:
+        with requests.get(comments_api_url, headers=headers, timeout=(10, 30), cookies=cookies_dict, proxies=proxies) as response:
             response.raise_for_status()
             response.encoding = 'utf-8'          
             return response.json()
@@ -143,7 +143,8 @@ def download_from_api(
     app_base_dir=None,
     manga_filename_style_for_sort_check=None,
     processed_post_ids=None,
-    fetch_all_first=False  
+    fetch_all_first=False,
+    proxies=None
     ):
     parsed_input_url_for_domain = urlparse(api_url_input)
     api_domain = parsed_input_url_for_domain.netloc
@@ -179,7 +180,7 @@ def download_from_api(
         direct_post_api_url = f"https://{api_domain}/api/v1/{service}/user/{user_id}/post/{target_post_id}"
         logger(f"   Attempting direct fetch for target post: {direct_post_api_url}")
         try:
-            with requests.get(direct_post_api_url, headers=headers, timeout=(10, 30), cookies=cookies_for_api) as direct_response:
+            with requests.get(direct_post_api_url, headers=headers, timeout=(10, 30), cookies=cookies_for_api, proxies=proxies) as direct_response:
                 direct_response.raise_for_status()
                 direct_response.encoding = 'utf-8' 
                 direct_post_data = direct_response.json()
@@ -249,7 +250,7 @@ def download_from_api(
                 logger(f"   Manga Mode: Reached specified end page ({end_page}). Stopping post fetch.")
                 break
             try:
-                posts_batch_manga = fetch_posts_paginated(api_base_url, headers, current_offset_manga, logger, cancellation_event, pause_event, cookies_dict=cookies_for_api)
+                posts_batch_manga = fetch_posts_paginated(api_base_url, headers, current_offset_manga, logger, cancellation_event, pause_event, cookies_dict=cookies_for_api, proxies=proxies)
                 if not isinstance(posts_batch_manga, list):
                     logger(f"❌ API Error (Manga Mode): Expected list of posts, got {type(posts_batch_manga)}.")
                     break
@@ -351,7 +352,7 @@ def download_from_api(
             break
             
         try:
-            raw_posts_batch = fetch_posts_paginated(api_base_url, headers, current_offset, logger, cancellation_event, pause_event, cookies_dict=cookies_for_api)
+            raw_posts_batch = fetch_posts_paginated(api_base_url, headers, current_offset, logger, cancellation_event, pause_event, cookies_dict=cookies_for_api, proxies=proxies)
             if not isinstance(raw_posts_batch, list):
                 logger(f"❌ API Error: Expected list of posts, got {type(raw_posts_batch)} at page {current_page_num} (offset {current_offset}).")
                 break
