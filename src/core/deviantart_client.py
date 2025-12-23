@@ -13,9 +13,17 @@ class DeviantArtClient:
 
     def __init__(self, logger_func=print):
         self.session = requests.Session()
+        # Headers matching 1.py (Firefox)
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': '*/*',
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/png,image/svg+xml,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
         })
         self.access_token = None
         self.logger = logger_func
@@ -60,7 +68,21 @@ class DeviantArtClient:
             try:
                 resp = self.session.get(url, params=params, timeout=20)
                 
-                # Handle Token Expiration (401)
+                # --- Handle Status Codes ---
+                
+                # 429: Rate Limit (Retry infinitely like 1.py)
+                if resp.status_code == 429:
+                    retry_after = resp.headers.get('Retry-After')
+                    if retry_after:
+                        sleep_time = int(retry_after) + 1
+                    else:
+                        sleep_time = 5 # Default sleep from 1.py
+                    
+                    self._log_once(sleep_time, f"   [DeviantArt] ⚠️ Rate limit (429). Sleeping {sleep_time}s...")
+                    time.sleep(sleep_time)
+                    continue
+
+                # 401: Token Expired (Refresh and Retry)
                 if resp.status_code == 401: 
                     self.logger("   [DeviantArt] Token expired. Refreshing...")
                     if self.authenticate():
@@ -69,59 +91,50 @@ class DeviantArtClient:
                     else:
                         raise Exception("Failed to refresh token")
 
-                # Handle Rate Limiting (429)
-                if resp.status_code == 429:
-                    if retries < max_retries:
-                        retry_after = resp.headers.get('Retry-After')
-                        
-                        if retry_after:
-                            sleep_time = int(retry_after) + 1
-                            msg = f"   [DeviantArt] ⚠️ Rate limit (Server says wait {sleep_time}s)."
-                        else:
-                            sleep_time = backoff_delay * (2 ** retries)
-                            msg = f"   [DeviantArt] ⚠️ Rate limit reached. Retrying in {sleep_time}s..."
-                        
-                        # --- THREAD-SAFE LOGGING CHECK ---
-                        should_log = False
-                        with self.log_lock:
-                            if sleep_time not in self.logged_waits:
-                                self.logged_waits.add(sleep_time)
-                                should_log = True
-                        
-                        if should_log:
-                            self.logger(msg)
-                        
-                        time.sleep(sleep_time)
-                        retries += 1
-                        continue
-                    else:
-                        resp.raise_for_status()
+                # 400, 403, 404: Client Errors (DO NOT RETRY)
+                # These mean the file doesn't exist or isn't downloadable via this endpoint.
+                if 400 <= resp.status_code < 500:
+                    resp.raise_for_status() # This raises immediately, breaking the loop
+
+                # 5xx: Server Errors (Retry)
+                if 500 <= resp.status_code < 600:
+                    resp.raise_for_status() # Will be caught by except block below for retry
 
                 resp.raise_for_status()
                 
-                # Clear log history on success so we get warned again if limits return later
+                # Success - Clear logs
                 with self.log_lock:
-                    if self.logged_waits:
-                        self.logged_waits.clear()
+                    self.logged_waits.clear()
                         
                 return resp.json()
 
+            except requests.exceptions.HTTPError as e:
+                # If it's a 4xx error (caught above), re-raise it immediately 
+                # so get_deviation_content can switch to fallback logic.
+                if e.response is not None and 400 <= e.response.status_code < 500:
+                    raise e
+                
+                # Otherwise fall through to general retry logic (for 5xx)
+                pass
+
             except requests.exceptions.RequestException as e:
+                # Network errors / 5xx errors -> Retry
                 if retries < max_retries:
-                    # Using the lock here too to prevent connection error spam
-                    should_log = False
-                    with self.log_lock:
-                        if "conn_error" not in self.logged_waits:
-                            self.logged_waits.add("conn_error")
-                            should_log = True
-                    
-                    if should_log:
-                        self.logger(f"   [DeviantArt] Connection error: {e}. Retrying...")
-                    
-                    time.sleep(2)
+                    self._log_once("conn_error", f"   [DeviantArt] Connection error: {e}. Retrying...")
+                    time.sleep(backoff_delay)
                     retries += 1
                     continue
                 raise e
+    
+    def _log_once(self, key, message):
+        """Helper to avoid spamming the same log message during loops."""
+        should_log = False
+        with self.log_lock:
+            if key not in self.logged_waits:
+                self.logged_waits.add(key)
+                should_log = True
+        if should_log:
+            self.logger(message)
 
     def get_deviation_uuid(self, url):
         """Scrapes the deviation page to find the UUID."""
@@ -139,13 +152,17 @@ class DeviantArtClient:
 
     def get_deviation_content(self, uuid):
         """Fetches download info."""
+        # 1. Try high-res download endpoint
         try:
             data = self._api_call(f"/deviation/download/{uuid}")
             if 'src' in data:
                 return data
         except:
+            # If 400/403 (Not downloadable), we fail silently here 
+            # and proceed to step 2 (Metadata fallback)
             pass
         
+        # 2. Fallback to standard content
         try:
             meta = self._api_call(f"/deviation/{uuid}")
             if 'content' in meta:
