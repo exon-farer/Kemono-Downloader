@@ -133,7 +133,8 @@ class PostProcessorWorker:
                  sfp_threshold=None,
                  handle_unknown_mode=False,
                  creator_name_cache=None,
-                 add_info_in_pdf=False
+                 add_info_in_pdf=False,
+                 proxies=None
 
                  ):
         self.post = post_data
@@ -208,9 +209,8 @@ class PostProcessorWorker:
         self.sfp_threshold = sfp_threshold 
         self.handle_unknown_mode = handle_unknown_mode 
         self.creator_name_cache = creator_name_cache 
-        #-- New assign --
         self.add_info_in_pdf = add_info_in_pdf
-        #-- New assign --
+        self.proxies = proxies
 
 
         if self.compress_images and Image is None:
@@ -263,7 +263,7 @@ class PostProcessorWorker:
             new_url = parsed_url._replace(netloc=new_domain).geturl()
             
             try:
-                with requests.head(new_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5, allow_redirects=True) as resp:
+                with requests.head(new_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5, allow_redirects=True, proxies=self.proxies) as resp:
                     if resp.status_code == 200:
                         return new_url
             except requests.RequestException:
@@ -338,7 +338,8 @@ class PostProcessorWorker:
                 api_original_filename_for_size_check = file_info.get('_original_name_for_log', file_info.get('name'))
                 try:
                         # Use a stream=True HEAD request to get headers without downloading the body
-                        with requests.head(file_url, headers=file_download_headers, timeout=15, cookies=cookies_to_use_for_file, allow_redirects=True) as head_response:
+                        with requests.head(file_url, headers=file_download_headers, timeout=15, cookies=cookies_to_use_for_file, allow_redirects=True, proxies=self.proxies) as head_response:
+                               
                                 head_response.raise_for_status()
                                 content_length = head_response.headers.get('Content-Length')
                                 if content_length:
@@ -672,7 +673,7 @@ class PostProcessorWorker:
                 
                 current_url_to_try = file_url
                           
-                response = requests.get(current_url_to_try, headers=file_download_headers, timeout=(30, 300), stream=True, cookies=cookies_to_use_for_file)
+                response = requests.get(current_url_to_try, headers=file_download_headers, timeout=(30, 300), stream=True, cookies=cookies_to_use_for_file, proxies=self.proxies)
                 
                 if response.status_code == 403 and ('kemono.' in current_url_to_try or 'coomer.' in current_url_to_try):
                     self.logger(f"   ⚠️ Got 403 Forbidden for '{api_original_filename}'. Attempting subdomain rotation...")
@@ -681,8 +682,7 @@ class PostProcessorWorker:
                         self.logger(f"   Retrying with new URL: {new_url}")
                         file_url = new_url
                         response.close() # Close the old response
-                        response = requests.get(new_url, headers=file_download_headers, timeout=(30, 300), stream=True, cookies=cookies_to_use_for_file)
-
+                        response = requests.get(new_url, headers=file_download_headers, timeout=(30, 300), stream=True, cookies=cookies_to_use_for_file, proxies=self.proxies)
                 response.raise_for_status()
                 
                 # --- REVISED AND MOVED SIZE CHECK LOGIC ---
@@ -1104,8 +1104,8 @@ class PostProcessorWorker:
                     'Referer': creator_page_url,
                     'Accept': 'text/css'
                     }
-                cookies = prepare_cookies_for_request(self.use_cookie, self.cookie_text, self.selected_cookie_file, self.app_base_dir, self.logger, target_domain=api_domain)
-                full_post_data = fetch_single_post_data(api_domain, self.service, self.user_id, post_id, headers, self.logger, cookies_dict=cookies)
+                cookies = prepare_cookies_for_request(self.use_cookie, self.cookie_text, self.selected_cookie_file, self.app_base_dir, self.logger, target_domain=api_domain)  
+                full_post_data = fetch_single_post_data(api_domain, self.service, self.user_id, post_id, headers, self.logger, cookies_dict=cookies, proxies=self.proxies)              
                 if full_post_data:
                     self.logger("   ✅ Full post data fetched successfully.")
                     self.post = full_post_data
@@ -1306,13 +1306,17 @@ class PostProcessorWorker:
                         if not any(d in api_domain_for_comments.lower() for d in ['kemono.su', 'kemono.party', 'kemono.cr', 'coomer.su', 'coomer.party', 'coomer.st']):
                             self.logger(f"⚠️ Unrecognized domain '{api_domain_for_comments}' for comment API. Defaulting based on service.")
                             api_domain_for_comments = "kemono.cr" if "kemono" in self.service.lower() else "coomer.st"
+                       
+                        # Fetch comments (Indented correctly now)
                         comments_data = fetch_post_comments(
                             api_domain_for_comments, self.service, self.user_id, post_id,
                             headers, self.logger, self.cancellation_event, self.pause_event,
                             cookies_dict=prepare_cookies_for_request(
                                 self.use_cookie, self.cookie_text, self.selected_cookie_file, self.app_base_dir, self.logger
-                            )
+                            ),
+                            proxies=self.proxies 
                         )
+                     
                         if comments_data:
                             self.logger(f"     Fetched {len(comments_data)} comments for post {post_id}.")
                             for comment_item_idx, comment_item in enumerate(comments_data):
@@ -1339,8 +1343,8 @@ class PostProcessorWorker:
                     except RuntimeError as e_fetch_comment:
                         self.logger(f"   ⚠️ Error fetching or processing comments for post {post_id}: {e_fetch_comment}")
                     except Exception as e_generic_comment:
-                        self.logger(f"   ❌ Unexpected error during comment processing for post {post_id}: {e_generic_comment}\n{traceback.format_exc(limit=2)}")
-                    self.logger(f"   [Char Scope: Comments] Phase 2 Result: post_is_candidate_by_comment_char_match = {post_is_candidate_by_comment_char_match}")
+                        self.logger(f"   ❌ Unexpected error during comment processing for post {post_id}: {e_generic_comment}\n{traceback.format_exc(limit=2)}")                
+                
                 else:
                     self.logger(f"   [Char Scope: Comments] Phase 2: Skipped comment check for post ID '{post_id}' because a file match already made it a candidate.")
 
@@ -2327,9 +2331,10 @@ class DownloadThread(QThread):
                  manga_custom_filename_format="{published} {title}",
                  manga_custom_date_format="YYYY-MM-DD" ,
                  sfp_threshold=None,
-                 creator_name_cache=None 
-
+                 creator_name_cache=None,
+                 proxies=None 
                  ): 
+
         super().__init__()
         self.api_url_input = api_url_input
         self.output_dir = output_dir
@@ -2404,6 +2409,7 @@ class DownloadThread(QThread):
         self.domain_override = domain_override 
         self.sfp_threshold = sfp_threshold 
         self.creator_name_cache = creator_name_cache 
+        self.proxies = proxies
 
         if self.compress_images and Image is None:
             self.logger("⚠️ Image compression disabled: Pillow library not found (DownloadThread).")
@@ -2437,6 +2443,7 @@ class DownloadThread(QThread):
 
             self.logger("   Starting post fetch (single-threaded download process)...")
 
+            # --- FIX: Removed duplicate proxies argument here ---
             post_generator = download_from_api(
                 self.api_url_input,
                 logger=self.logger,
@@ -2451,7 +2458,8 @@ class DownloadThread(QThread):
                 app_base_dir=self.app_base_dir,
                 manga_filename_style_for_sort_check=self.manga_filename_style if self.manga_mode_active else None,
                 processed_post_ids=self.processed_post_ids_set,
-                fetch_all_first=self.fetch_first 
+                fetch_all_first=self.fetch_first,
+                proxies=self.proxies 
             )
 
             for posts_batch_data in post_generator:
@@ -2464,6 +2472,7 @@ class DownloadThread(QThread):
                         was_process_cancelled = True
                         break
 
+                    # --- FIX: Ensure 'proxies' is in this dictionary ---
                     worker_args = {
                         'post_data': individual_post_data,
                         'emitter': worker_signals_obj,
@@ -2532,7 +2541,8 @@ class DownloadThread(QThread):
                         'archive_only_mode': self.archive_only_mode, 
                         'manga_custom_filename_format': self.manga_custom_filename_format,
                         'manga_custom_date_format': self.manga_custom_date_format,
-                        'sfp_threshold': self.sfp_threshold 
+                        'sfp_threshold': self.sfp_threshold,
+                        'proxies': self.proxies 
                     }
 
                     post_processing_worker = PostProcessorWorker(**worker_args)

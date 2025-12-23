@@ -3,7 +3,7 @@ import time
 import os
 import json
 import traceback
-from concurrent.futures import ThreadPoolExecutor, as_completed, Future
+from concurrent.futures import ThreadPoolExecutor, as_completed, Future, CancelledError
 from .api_client import download_from_api
 from .workers import PostProcessorWorker
 from ..config.constants import (
@@ -113,6 +113,29 @@ class DownloadManager:
             self.is_running = False # Allow another session to start if needed
             self.progress_queue.put({'type': 'handoff_to_single_thread', 'payload': (config,)})
 
+    def _get_proxies_from_config(self, config):
+        """Constructs the proxy dictionary from the config."""
+        if not config.get('proxy_enabled'):
+            return None
+
+        host = config.get('proxy_host')
+        port = config.get('proxy_port')
+        if not host or not port:
+            return None
+
+        proxy_str = f"http://{host}:{port}"
+        
+        # Add auth if provided
+        user = config.get('proxy_username')
+        password = config.get('proxy_password')
+        if user and password:
+            proxy_str = f"http://{user}:{password}@{host}:{port}"
+        
+        return {
+            "http": proxy_str,
+            "https": proxy_str
+        }
+
     def _fetch_and_queue_posts_for_pool(self, config, restore_data, creator_profile_data):
         """
         Fetches posts from the API in batches and submits them as tasks to a thread pool.
@@ -126,6 +149,9 @@ class DownloadManager:
             session_processed_ids = set(restore_data.get('processed_post_ids', [])) if restore_data else set()
             profile_processed_ids = set(creator_profile_data.get('processed_post_ids', []))
             processed_ids = session_processed_ids.union(profile_processed_ids)
+            
+            # Helper to get proxies
+            proxies = self._get_proxies_from_config(config)
 
             if restore_data and 'all_posts_data' in restore_data:
                 # This logic for session restore remains as it relies on a pre-fetched list
@@ -143,12 +169,20 @@ class DownloadManager:
                 for post_data in posts_to_process:
                     if self.cancellation_event.is_set():
                         break
-                    worker = PostProcessorWorker(post_data, config, self.progress_queue)
+                    
+                    worker_args = self._map_config_to_worker_args(post_data, config)
+                    # Manually inject proxies here if _map_config_to_worker_args didn't catch it (though it should)
+                    worker_args['proxies'] = proxies
+                    
+                    worker = PostProcessorWorker(**worker_args)
                     future = self.thread_pool.submit(worker.process)
                     future.add_done_callback(self._handle_future_result)
                     self.active_futures.append(future)
             else:
                 # --- Streaming Logic ---
+                if proxies:
+                    self._log(f"   🌐 Using Proxy: {config.get('proxy_host')}:{config.get('proxy_port')}")
+
                 post_generator = download_from_api(
                     api_url_input=config['api_url'],
                     logger=self._log,
@@ -156,7 +190,8 @@ class DownloadManager:
                     end_page=config.get('end_page'),
                     cancellation_event=self.cancellation_event,
                     pause_event=self.pause_event,
-                    cookies_dict=None # Cookie handling handled inside client if needed, or update if passed
+                    cookies_dict=None, # Cookie handling handled inside client if needed
+                    proxies=proxies    # <--- NEW: Pass proxies to API client
                 )
 
                 for post_batch in post_generator:
@@ -169,23 +204,16 @@ class DownloadManager:
                     new_posts_batch = [p for p in post_batch if p.get('id') not in processed_ids]
                     
                     if not new_posts_batch:
-                         # Log skipped count for UI feedback if needed, already handled in api_client usually
                          continue
 
                     # Update total posts dynamically as we find them
                     self.total_posts += len(new_posts_batch) 
-                    # Note: total_posts in streaming is a "running total of found posts", not absolute total
                     
                     for post_data in new_posts_batch:
                         if self.cancellation_event.is_set():
                             break
                         
-                        # Pass explicit args or config to worker
-                        # Ideally PostProcessorWorker should accept the whole config dict or mapped args
-                        # For now assuming PostProcessorWorker takes (post_data, config_dict, queue) 
-                        # OR we map the config to the args expected by PostProcessorWorker.__init__
-                        
-                        # MAPPING CONFIG TO WORKER ARGS (Safe wrapper)
+                        # MAPPING CONFIG TO WORKER ARGS
                         worker_args = self._map_config_to_worker_args(post_data, config)
                         worker = PostProcessorWorker(**worker_args)
                         
@@ -193,7 +221,7 @@ class DownloadManager:
                         future.add_done_callback(self._handle_future_result)
                         self.active_futures.append(future)
                         
-                    # Small sleep to prevent UI freeze if batches are huge and instant
+                    # Small sleep to prevent UI freeze
                     time.sleep(0.01)
 
         except Exception as e:
@@ -205,6 +233,9 @@ class DownloadManager:
 
     def _map_config_to_worker_args(self, post_data, config):
         """Helper to map the flat config dict to PostProcessorWorker arguments."""
+        # Get proxy dict
+        proxies = self._get_proxies_from_config(config)
+
         # This mirrors the arguments in workers.py PostProcessorWorker.__init__
         return {
             'post_data': post_data,
@@ -221,29 +252,27 @@ class DownloadManager:
             'custom_folder_name': config.get('custom_folder_name'),
             'compress_images': config.get('compress_images'),
             'download_thumbnails': config.get('download_thumbnails'),
-            'service': config.get('service') or 'unknown', # extracted elsewhere
+            'service': config.get('service') or 'unknown',
             'user_id': config.get('user_id') or 'unknown',
             'pause_event': self.pause_event,
             'api_url_input': config.get('api_url'),
             'cancellation_event': self.cancellation_event,
-            'downloaded_files': None, # Managed per worker or global if passed
+            'downloaded_files': None, 
             'downloaded_file_hashes': None,
             'downloaded_files_lock': None,
             'downloaded_file_hashes_lock': None,
-            # Add other necessary fields from config...
             'manga_mode_active': config.get('manga_mode_active'),
             'manga_filename_style': config.get('manga_filename_style'),
-            'manga_custom_filename_format': config.get('custom_manga_filename_format', "{published} {title}"), # Pass custom format
+            'manga_custom_filename_format': config.get('custom_manga_filename_format', "{published} {title}"),
             'manga_custom_date_format': config.get('manga_custom_date_format', "YYYY-MM-DD"),
             'use_multithreading': config.get('use_multithreading', True),
-             # Ensure defaults for others
+            'proxies': proxies, # <--- NEW: Pass proxies to worker
         }
         
     def _setup_creator_profile(self, config):
         """Prepares the path and loads data for the current creator's profile."""
         # Extract name logic here or assume config has it
-        # ... (Same as your existing code)
-        self.current_creator_name_for_profile = "Unknown" # Placeholder
+        self.current_creator_name_for_profile = "Unknown" 
         # You should ideally extract name from URL or config here if available
         return {}
 

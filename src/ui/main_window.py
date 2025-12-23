@@ -843,7 +843,20 @@ class DownloaderApp (QWidget ):
         settings['add_info_in_pdf'] = self.add_info_in_pdf_setting # Save to settings dict
         settings['keep_duplicates_mode'] = self.keep_duplicates_mode
         settings['keep_duplicates_limit'] = self.keep_duplicates_limit
-        
+
+        settings['proxy_enabled'] = self.settings.value(PROXY_ENABLED_KEY, False, type=bool)
+        settings['proxy_host'] = self.settings.value(PROXY_HOST_KEY, "", type=str)
+        settings['proxy_port'] = self.settings.value(PROXY_PORT_KEY, "", type=str)
+        settings['proxy_username'] = self.settings.value(PROXY_USERNAME_KEY, "", type=str)
+        settings['proxy_password'] = self.settings.value(PROXY_PASSWORD_KEY, "", type=str)
+
+        settings['proxies'] = None
+        if settings['proxy_enabled'] and settings['proxy_host'] and settings['proxy_port']:
+            proxy_str = f"http://{settings['proxy_host']}:{settings['proxy_port']}"
+            if settings['proxy_username'] and settings['proxy_password']:
+                 proxy_str = f"http://{settings['proxy_username']}:{settings['proxy_password']}@{settings['proxy_host']}:{settings['proxy_port']}"
+            settings['proxies'] = {'http': proxy_str, 'https': proxy_str}
+
         return settings
 
 
@@ -4627,6 +4640,14 @@ class DownloaderApp (QWidget ):
         if should_use_multithreading_for_posts:
             log_messages.append(f"    Number of Post Worker Threads: {effective_num_post_workers}")
      
+        proxy_enabled_log = self.settings.value(PROXY_ENABLED_KEY, False, type=bool)
+        if proxy_enabled_log:
+            p_host = self.settings.value(PROXY_HOST_KEY, "")
+            p_port = self.settings.value(PROXY_PORT_KEY, "")
+            log_messages.append(f"    Proxy: Enabled ({p_host}:{p_port})")
+        else:
+            log_messages.append(f"    Proxy: Disabled")
+
         if domain_override_command:
             self.log_signal.emit(f"ℹ️ Domain Override Active: Will probe for the correct 'n*' subdomain on the '.{domain_override_command}' domain for each file.")
 
@@ -4639,7 +4660,7 @@ class DownloaderApp (QWidget ):
         self.set_ui_enabled(False)
 
         from src.config.constants import FOLDER_NAME_STOP_WORDS
-
+        current_proxies = self._get_current_ui_settings_as_dict().get('proxies')
         args_template = {
             'api_url_input': api_url,
             'download_root': effective_output_dir_for_run,
@@ -4715,7 +4736,8 @@ class DownloaderApp (QWidget ):
             'fetch_first': fetch_first_enabled, 
             'sfp_threshold': download_commands.get('sfp_threshold'),
             'handle_unknown_mode': handle_unknown_command,
-            'add_info_in_pdf': self.add_info_in_pdf_setting,             
+            'add_info_in_pdf': self.add_info_in_pdf_setting,     
+            'proxies': current_proxies        
         }
 
         args_template['override_output_dir'] = override_output_dir
@@ -4741,7 +4763,8 @@ class DownloaderApp (QWidget ):
                 'app_base_dir': app_base_dir_for_cookies,
                 'manga_filename_style_for_sort_check': self.manga_filename_style,
                 'processed_post_ids': processed_post_ids_for_this_run,
-                'fetch_all_first': True
+                'fetch_all_first': True,
+                'proxies': self._get_current_ui_settings_as_dict().get('proxies')
             }
             
             self.download_thread = threading.Thread(target=self._run_fetch_only_thread, args=(fetch_thread_args,), daemon=True)
@@ -5097,8 +5120,7 @@ class DownloaderApp (QWidget ):
         
         ppw_expected_keys = list(PostProcessorWorker.__init__.__code__.co_varnames)[1:]
         
-        # 1. Define all LIVE RUNTIME arguments.
-        # These are taken from the current app state and are the same for all workers.
+        current_proxies = self._get_current_ui_settings_as_dict().get('proxies')        
         live_runtime_args = {
             'emitter': self.worker_to_gui_queue,
             'creator_name_cache': self.creator_name_cache,
@@ -5128,7 +5150,8 @@ class DownloaderApp (QWidget ):
             'use_cookie': self.use_cookie_checkbox.isChecked(),
             'cookie_text': self.cookie_text_input.text(),
             'selected_cookie_file': self.selected_cookie_filepath,
-            'add_info_in_pdf': self.add_info_in_pdf_setting,            
+            'add_info_in_pdf': self.add_info_in_pdf_setting,       
+            'proxies': current_proxies,     
         }
 
         # 2. Define DEFAULTS for all settings that *should* be in the profile.
@@ -5364,6 +5387,19 @@ class DownloaderApp (QWidget ):
         self._update_manga_filename_style_button_text()
         self._update_multipart_toggle_button_text()
 
+        if 'proxy_enabled' in settings:
+            self.settings.setValue(PROXY_ENABLED_KEY, settings['proxy_enabled'])
+        if 'proxy_host' in settings:
+            self.settings.setValue(PROXY_HOST_KEY, settings['proxy_host'])
+        if 'proxy_port' in settings:
+            self.settings.setValue(PROXY_PORT_KEY, settings['proxy_port'])
+        if 'proxy_username' in settings:
+            self.settings.setValue(PROXY_USERNAME_KEY, settings['proxy_username'])
+        if 'proxy_password' in settings:
+            self.settings.setValue(PROXY_PASSWORD_KEY, settings['proxy_password'])
+            
+        self.settings.sync()
+
     def start_multi_threaded_download(self, num_post_workers, **kwargs):
         """
         Initializes and starts the multi-threaded download process.
@@ -5424,7 +5460,8 @@ class DownloaderApp (QWidget ):
                 app_base_dir=worker_args_template.get('app_base_dir'),
                 manga_filename_style_for_sort_check=worker_args_template.get('manga_filename_style'),
                 processed_post_ids=worker_args_template.get('processed_post_ids', []),
-                fetch_all_first=worker_args_template.get('fetch_first', False)
+                fetch_all_first=worker_args_template.get('fetch_first', False),
+                proxies=worker_args_template.get('proxies')
             )
 
             ppw_expected_keys = list(PostProcessorWorker.__init__.__code__.co_varnames)[1:]
