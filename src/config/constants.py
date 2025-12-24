@@ -75,6 +75,7 @@ PROXY_HOST_KEY = "proxy/host"
 PROXY_PORT_KEY = "proxy/port"
 PROXY_USERNAME_KEY = "proxy/username"
 PROXY_PASSWORD_KEY = "proxy/password"
+PROXY_TYPE_KEY = "proxy_type"
 
 # --- UI Constants and Identifiers ---
 HTML_PREFIX = "<!HTML!>"
