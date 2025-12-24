@@ -849,12 +849,24 @@ class DownloaderApp (QWidget ):
         settings['proxy_port'] = self.settings.value(PROXY_PORT_KEY, "", type=str)
         settings['proxy_username'] = self.settings.value(PROXY_USERNAME_KEY, "", type=str)
         settings['proxy_password'] = self.settings.value(PROXY_PASSWORD_KEY, "", type=str)
+        proxy_type_str = self.settings.value("proxy_type", "HTTP", type=str)
 
         settings['proxies'] = None
         if settings['proxy_enabled'] and settings['proxy_host'] and settings['proxy_port']:
-            proxy_str = f"http://{settings['proxy_host']}:{settings['proxy_port']}"
+            
+            # Determine correct scheme
+            scheme = "http"
+            if proxy_type_str == "SOCKS5":
+                scheme = "socks5h" # 'socks5h' forces remote DNS resolution (safer/better for bypassing)
+            elif proxy_type_str == "SOCKS4":
+                scheme = "socks4"
+
+            # Build URL string
             if settings['proxy_username'] and settings['proxy_password']:
-                 proxy_str = f"http://{settings['proxy_username']}:{settings['proxy_password']}@{settings['proxy_host']}:{settings['proxy_port']}"
+                 proxy_str = f"{scheme}://{settings['proxy_username']}:{settings['proxy_password']}@{settings['proxy_host']}:{settings['proxy_port']}"
+            else:
+                 proxy_str = f"{scheme}://{settings['proxy_host']}:{settings['proxy_port']}"
+            
             settings['proxies'] = {'http': proxy_str, 'https': proxy_str}
 
         return settings
