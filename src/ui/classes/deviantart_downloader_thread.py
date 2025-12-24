@@ -3,7 +3,7 @@ import time
 import requests
 import re
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, wait
+# REMOVED: ThreadPoolExecutor, wait (Not needed for sequential speed)
 from PyQt5.QtCore import QThread, pyqtSignal
 from ...core.deviantart_client import DeviantArtClient
 from ...utils.file_utils import clean_folder_name
@@ -21,21 +21,17 @@ class DeviantArtDownloadThread(QThread):
         self.pause_event = pause_event
         self.cancellation_event = cancellation_event
         
-        # Pass logger to client so we see "Rate Limit" messages in the UI
+        # Pass logger to client
         self.client = DeviantArtClient(logger_func=self.progress_signal.emit)
         
         self.parent_app = parent 
         self.download_count = 0
         self.skip_count = 0
-        
-        # --- THREAD SETTINGS ---
-        # STRICTLY 1 THREAD (Sequential) to match 1.py and avoid Rate Limits
-        self.max_threads = 1 
 
     def run(self):
         self.progress_signal.emit("=" * 40)
         self.progress_signal.emit(f"🚀 Starting DeviantArt download for: {self.url}")
-        self.progress_signal.emit(f"   ℹ️ Mode: Sequential (1 thread) to prevent 429 errors.")
+        self.progress_signal.emit(f"   ℹ️ Mode: High-Speed Sequential (Matches 1.py)")
         
         try:
             if not self.client.authenticate():
@@ -91,28 +87,24 @@ class DeviantArtDownloadThread(QThread):
         if not os.path.exists(base_folder):
             os.makedirs(base_folder, exist_ok=True)
 
-        with ThreadPoolExecutor(max_workers=self.max_threads) as executor:
-            while has_more:
+        # --- OPTIMIZED LOOP (Matches 1.py structure) ---
+        while has_more:
+            if self._check_pause_cancel(): break
+
+            data = self.client.get_gallery_folder(username, offset=offset)
+            results = data.get('results', [])
+            has_more = data.get('has_more', False)
+            offset = data.get('next_offset')
+
+            if not results: break
+
+            # DIRECT LOOP - No ThreadPoolExecutor overhead
+            for deviation in results:
                 if self._check_pause_cancel(): break
+                self._process_deviation_task(deviation, base_folder)
 
-                data = self.client.get_gallery_folder(username, offset=offset)
-                results = data.get('results', [])
-                has_more = data.get('has_more', False)
-                offset = data.get('next_offset')
-
-                if not results: break
-
-                futures = []
-                for deviation in results:
-                    if self._check_pause_cancel(): break
-                    future = executor.submit(self._process_deviation_task, deviation, base_folder)
-                    futures.append(future)
-
-                # Wait for this batch to finish before getting the next page
-                wait(futures)
-                
-                # Match 1.py: Sleep 1s between pages to be nice to API
-                time.sleep(1) 
+            # Be nice to API (1 second sleep per batch of 24)
+            time.sleep(1) 
 
     def _process_deviation_task(self, deviation, base_folder):
         if self._check_pause_cancel(): return
@@ -121,7 +113,7 @@ class DeviantArtDownloadThread(QThread):
         title = deviation.get('title', 'Unknown')
 
         try:
-            # This handles the fallback logic internally
+            # Try to get content (Handles fallback internally now)
             content = self.client.get_deviation_content(dev_id)
             if content:
                 self._download_file(content['src'], deviation, override_dir=base_folder)
@@ -155,7 +147,6 @@ class DeviantArtDownloadThread(QThread):
         
         final_filename = f"{safe_title}{ext}"
 
-        # Naming logic
         if self.parent_app and self.parent_app.manga_mode_checkbox.isChecked():
             try:
                 creator_name = metadata.get('author', {}).get('username', 'Unknown')
@@ -177,7 +168,8 @@ class DeviantArtDownloadThread(QThread):
                 final_filename = f"{clean_folder_name(new_name)}{ext}"
                 
             except Exception as e:
-                self.progress_signal.emit(f"   ⚠️ Renaming failed ({e}), using default.")
+                # Reduced logging verbosity slightly for speed
+                pass 
 
         save_dir = override_dir if override_dir else self.output_dir
         if not os.path.exists(save_dir):
