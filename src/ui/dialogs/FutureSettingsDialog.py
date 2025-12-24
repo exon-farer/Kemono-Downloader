@@ -249,13 +249,22 @@ class FutureSettingsDialog(QDialog):
         self.proxy_enabled_checkbox.stateChanged.connect(self._proxy_setting_changed)
         proxy_layout.addWidget(self.proxy_enabled_checkbox, 0, 0, 1, 2)
 
+        # Proxy Type Dropdown
+        self.proxy_type_label = QLabel("Proxy Type:") 
+        self.proxy_type_combo = QComboBox()
+        self.proxy_type_combo.addItems(["HTTP", "SOCKS4", "SOCKS5"])
+        self.proxy_type_combo.currentIndexChanged.connect(self._proxy_setting_changed)
+        proxy_layout.addWidget(self.proxy_type_label, 1, 0)
+        proxy_layout.addWidget(self.proxy_type_combo, 1, 1)
+
+
         # Host / IP
         self.proxy_host_label = QLabel()
         self.proxy_host_input = QLineEdit()
         self.proxy_host_input.setPlaceholderText("127.0.0.1")
         self.proxy_host_input.editingFinished.connect(self._proxy_setting_changed)
-        proxy_layout.addWidget(self.proxy_host_label, 1, 0)
-        proxy_layout.addWidget(self.proxy_host_input, 1, 1)
+        proxy_layout.addWidget(self.proxy_host_label, 2, 0) # Changed row to 2
+        proxy_layout.addWidget(self.proxy_host_input, 2, 1)
 
         # Port
         self.proxy_port_label = QLabel()
@@ -263,16 +272,16 @@ class FutureSettingsDialog(QDialog):
         self.proxy_port_input.setPlaceholderText("8080")
         self.proxy_port_input.setValidator(QIntValidator(1, 65535, self)) # Only numbers
         self.proxy_port_input.editingFinished.connect(self._proxy_setting_changed)
-        proxy_layout.addWidget(self.proxy_port_label, 2, 0)
-        proxy_layout.addWidget(self.proxy_port_input, 2, 1)
+        proxy_layout.addWidget(self.proxy_port_label, 3, 0)
+        proxy_layout.addWidget(self.proxy_port_input, 3, 1)
 
         # Username
         self.proxy_user_label = QLabel()
         self.proxy_user_input = QLineEdit()
         self.proxy_user_input.setPlaceholderText("(Optional)")
         self.proxy_user_input.editingFinished.connect(self._proxy_setting_changed)
-        proxy_layout.addWidget(self.proxy_user_label, 3, 0)
-        proxy_layout.addWidget(self.proxy_user_input, 3, 1)
+        proxy_layout.addWidget(self.proxy_user_label, 4, 0)
+        proxy_layout.addWidget(self.proxy_user_input, 4, 1)
 
         # Password
         self.proxy_pass_label = QLabel()
@@ -280,8 +289,8 @@ class FutureSettingsDialog(QDialog):
         self.proxy_pass_input.setPlaceholderText("(Optional)")
         self.proxy_pass_input.setEchoMode(QLineEdit.Password) # Mask input
         self.proxy_pass_input.editingFinished.connect(self._proxy_setting_changed)
-        proxy_layout.addWidget(self.proxy_pass_label, 4, 0)
-        proxy_layout.addWidget(self.proxy_pass_input, 4, 1)
+        proxy_layout.addWidget(self.proxy_pass_label, 5, 0)
+        proxy_layout.addWidget(self.proxy_pass_input, 5, 1)
 
         network_tab_layout.addWidget(self.proxy_group_box)
         network_tab_layout.addStretch(1)
@@ -379,19 +388,32 @@ class FutureSettingsDialog(QDialog):
     # --- START: New Proxy Logic ---
     def _load_proxy_settings(self):
         """Loads proxy settings from QSettings into the UI."""
+        # Block signals to prevent triggering auto-save while loading
         self.proxy_enabled_checkbox.blockSignals(True)
+        self.proxy_type_combo.blockSignals(True)  # <--- NEW
         self.proxy_host_input.blockSignals(True)
         self.proxy_port_input.blockSignals(True)
         self.proxy_user_input.blockSignals(True)
         self.proxy_pass_input.blockSignals(True)
 
+        # Load values
         enabled = self.parent_app.settings.value(PROXY_ENABLED_KEY, False, type=bool)
+        proxy_type = self.parent_app.settings.value("proxy_type", "HTTP", type=str) # <--- NEW
         host = self.parent_app.settings.value(PROXY_HOST_KEY, "", type=str)
         port = self.parent_app.settings.value(PROXY_PORT_KEY, "", type=str)
         user = self.parent_app.settings.value(PROXY_USERNAME_KEY, "", type=str)
         password = self.parent_app.settings.value(PROXY_PASSWORD_KEY, "", type=str)
 
+        # Apply values to UI
         self.proxy_enabled_checkbox.setChecked(enabled)
+        
+        # <--- NEW: Set the dropdown selection
+        index = self.proxy_type_combo.findText(proxy_type)
+        if index >= 0:
+            self.proxy_type_combo.setCurrentIndex(index)
+        else:
+            self.proxy_type_combo.setCurrentIndex(0) # Default to first item if not found
+
         self.proxy_host_input.setText(host)
         self.proxy_port_input.setText(port)
         self.proxy_user_input.setText(user)
@@ -399,7 +421,9 @@ class FutureSettingsDialog(QDialog):
 
         self._update_proxy_fields_state(enabled)
 
+        # Unblock signals
         self.proxy_enabled_checkbox.blockSignals(False)
+        self.proxy_type_combo.blockSignals(False) # <--- NEW
         self.proxy_host_input.blockSignals(False)
         self.proxy_port_input.blockSignals(False)
         self.proxy_user_input.blockSignals(False)
@@ -408,16 +432,19 @@ class FutureSettingsDialog(QDialog):
     def _proxy_setting_changed(self):
         """Saves the current proxy UI state to QSettings."""
         enabled = self.proxy_enabled_checkbox.isChecked()
+        proxy_type = self.proxy_type_combo.currentText() # <--- NEW
         host = self.proxy_host_input.text().strip()
         port = self.proxy_port_input.text().strip()
         user = self.proxy_user_input.text().strip()
         password = self.proxy_pass_input.text().strip()
 
         self.parent_app.settings.setValue(PROXY_ENABLED_KEY, enabled)
+        self.parent_app.settings.setValue("proxy_type", proxy_type) # <--- NEW
         self.parent_app.settings.setValue(PROXY_HOST_KEY, host)
         self.parent_app.settings.setValue(PROXY_PORT_KEY, port)
         self.parent_app.settings.setValue(PROXY_USERNAME_KEY, user)
         self.parent_app.settings.setValue(PROXY_PASSWORD_KEY, password)
+        
         self.parent_app.settings.sync()
 
         self._update_proxy_fields_state(enabled)
@@ -427,6 +454,7 @@ class FutureSettingsDialog(QDialog):
 
     def _update_proxy_fields_state(self, enabled):
         """Enables or disables input fields based on the checkbox."""
+        self.proxy_type_combo.setEnabled(enabled)
         self.proxy_host_input.setEnabled(enabled)
         self.proxy_port_input.setEnabled(enabled)
         self.proxy_user_input.setEnabled(enabled)
