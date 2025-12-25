@@ -73,7 +73,6 @@ class HelpGuideDialog(QDialog):
                  <li>fap-nation.org/</li>
                  <li>Discord</li>
                  <li>allporncomic.com</li>
-                 <li>allporncomic.com</li>
                  <li>hentai2read.com</li>
                  <li>mangadex.org</li>
                  <li>Simpcity</li>
@@ -279,6 +278,46 @@ class HelpGuideDialog(QDialog):
              </ul>
              """),
 
+            ("Add to Queue",
+             """
+             <p>This feature allows you to queue up multiple distinct downloads with different settings and run them all sequentially.</p>
+
+             <h3 style='color: #E0E0E0;'>Step 1: Prepare the Download</h3>
+             <p>Before clicking add, configure the download exactly how you want it processed for this specific link:</p>
+             <ul>
+                 <li><b>Select Directory:</b> Choose where you want the files to go.</li>
+                 <li><b>Configure Options:</b> Check/uncheck boxes (e.g., "Separate Folders", "Use Cookie", "Manga Mode").</li>
+                 <li><b>Paste URL:</b> Enter the link for the creator or post you want to download.</li>
+             </ul>
+
+             <h3 style='color: #E0E0E0;'>Step 2: Add to Queue</h3>
+             <ol>
+                 <li>Click the <b>Add to Queue</b> button (located near the Start Download).</li>
+                 <li><b>Confirmation:</b> You will see a popup message and the log will print <code>✅ Job added to queue</code>.</li>
+                 <li>The URL box will clear, allowing you to immediately paste the next link.</li>
+             </ol>
+
+             <h3 style='color: #E0E0E0;'>Step 3: Repeat & Start</h3>
+             <p>You can repeat steps 1 and 2 as many times as you like. You can even change settings (like the download folder) between adds; the queue remembers the specific settings for each individual link.</p>
+             <p>To start processing the queue:</p>
+             <ol>
+                 <li>In the Link Input box, type exactly: <code>start queue</code></li>
+                 <li>The main "Start Download" button will change to <b>"🚀 Execute Queue"</b>.</li>
+                 <li>Click that button to begin.</li>
+             </ol>
+
+             <h3 style='color: #E0E0E0;'>Processing Behavior</h3>
+             <p>Once started, the app will lock the UI, load the first job, download it until finished, and automatically move to the next until the queue is empty.</p>
+
+             <h3 style='color: #E0E0E0;'>Special Case: Creator Selection Popup</h3>
+             <p>If you use the <b>Creator Selection</b> popup (the 🎨 button):</p>
+             <ul>
+                 <li>Select multiple creators in that popup and click <b>"Queue Selected"</b>.</li>
+                 <li>The app internally adds them to a temporary list.</li>
+                 <li>When you click the main <b>"Add to Queue"</b> button on the main window, it will detect that list and automatically bulk-create job files for all the creators you selected.</li>
+             </ul>
+             """),
+
             ("Special Commands",
              """
              <p>You can add special commands to the <b>"Filter by Character(s)"</b> input field to change download behavior for a single task. Commands are keywords wrapped in square brackets <code>[]</code>.</p>
@@ -450,7 +489,16 @@ class HelpGuideDialog(QDialog):
             ("Utility & Advanced Options",
              """
              <p>These features provide advanced control over your downloads, sessions, and application settings.</p>
-             
+
+             <h3 style='color: #E0E0E0;'>🛡️ Proxy Support </h3>
+             <p>You can now configure a proxy to bypass region blocks or ISP restrictions (e.g., for AllComic or Nhentai).</p>
+             <p>Go to <b>Settings ⚙️ > Proxy Tab</b> to set it up:</p>
+             <ul>
+                 <li><b>Protocols:</b> Full support for <b>HTTP</b>, <b>SOCKS4</b>, and <b>SOCKS5</b>.</li>
+                 <li><b>Authentication:</b> Supports username and password for private proxies.</li>
+                 <li><b>Global Effect:</b> Once enabled, all app connections (including API fetches and file downloads) will route through this proxy.</li>
+             </ul>
+
              <h3 style='color: #E0E0E0;'>Use Cookie</h3>
              <p>This is essential for downloading from sites that require a login (like <b>SimpCity</b> or accessing your <b>favorites</b> on Kemono/Coomer). You can either:</p>
              <ul>
@@ -484,6 +532,7 @@ class HelpGuideDialog(QDialog):
                          <li>Toggle <b>"Fetch First"</b> (to find all posts from a creator before starting any downloads).</li>
                      </ul>
                  </li>
+                 <li><b>Proxy Tab:</b> Configure HTTP/SOCKS proxies and authentication.</li>
                  <li><b>Updates Tab:</b> Check for and install new application updates.</li>
              </ul>
 
@@ -605,7 +654,8 @@ class HelpGuideDialog(QDialog):
         main_layout.addLayout(content_layout, 1)
 
         self.nav_list = QListWidget()
-        self.nav_list.setFixedWidth(int(220 * scale))
+        # Increased width to prevent scrollbar overlap
+        self.nav_list.setFixedWidth(int(280 * scale))
         # Styles are now set in the __init__ method
         content_layout.addWidget(self.nav_list)
 

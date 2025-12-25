@@ -28,8 +28,8 @@ class UpdateCheckDialog(QDialog):
         self.selected_profiles_list = [] # Will store a list of {'name': ..., 'data': ...}
         
         self._default_checkbox_tooltip = (
-            "If checked, the settings from the selected profile will be loaded into the main window.\n"
-            "You can then modify them. When you start the download, the new settings will be saved to the profile."
+            "If checked, the settings fields will be unlocked and editable.\n"
+            "If unchecked, settings will still load, but in 'Read-Only' mode."
         )
 
         self._init_ui()
@@ -65,13 +65,17 @@ class UpdateCheckDialog(QDialog):
         self.list_widget.itemChanged.connect(self._handle_item_changed)
         layout.addWidget(self.list_widget)
 
-        # --- NEW: Checkbox to Load Settings ---
-        self.load_settings_checkbox = QCheckBox("Load profile settings into UI (Edit Settings)")
-        self.load_settings_checkbox.setToolTip(self._default_checkbox_tooltip)
-        layout.addWidget(self.load_settings_checkbox)
+        # Renamed text to reflect new behavior
+        self.edit_settings_checkbox = QCheckBox("Enable Editing (Unlock Settings)")
+        self.edit_settings_checkbox.setToolTip(self._default_checkbox_tooltip)
+        
+        # Checked by default as requested
+        self.edit_settings_checkbox.setChecked(True) 
+        
+        layout.addWidget(self.edit_settings_checkbox)
         # -------------------------------------
 
-        # --- All Buttons in One Horizontal Layout ---
+      
         button_layout = QHBoxLayout()
         button_layout.setSpacing(6)  # small even spacing between all buttons
 
@@ -110,7 +114,8 @@ class UpdateCheckDialog(QDialog):
         self.deselect_all_button.setText(self._tr("deselect_all_button_text", "Deselect All"))
         self.check_button.setText(self._tr("update_check_dialog_check_button", "Check Selected"))
         self.close_button.setText(self._tr("update_check_dialog_close_button", "Close"))
-        self.load_settings_checkbox.setText(self._tr("update_check_load_settings_checkbox", "Load profile settings into UI (Edit Settings)"))
+        # Updated translation key and default text
+        self.edit_settings_checkbox.setText(self._tr("update_check_enable_editing_checkbox", "Enable Editing (Unlock Settings)"))
 
     def _load_profiles(self):
         """Loads all .json files from the creator_profiles directory as checkable items."""
@@ -133,7 +138,6 @@ class UpdateCheckDialog(QDialog):
                     with open(filepath, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                     
-                    # Basic validation to ensure it's a valid profile
                     if 'creator_url' in data and 'processed_post_ids' in data:
                         creator_name = os.path.splitext(filename)[0]
                         profiles_found.append({'name': creator_name, 'data': data})
@@ -147,7 +151,6 @@ class UpdateCheckDialog(QDialog):
         for profile_info in profiles_found:
             item = QListWidgetItem(profile_info['name'])
             item.setData(Qt.UserRole, profile_info)
-            # --- Make item checkable ---
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Unchecked)
             self.list_widget.addItem(item)
@@ -158,14 +161,13 @@ class UpdateCheckDialog(QDialog):
             self.check_button.setEnabled(False)
             self.select_all_button.setEnabled(False)
             self.deselect_all_button.setEnabled(False)
-            self.load_settings_checkbox.setEnabled(False)
+            self.edit_settings_checkbox.setEnabled(False)
 
     def _toggle_all_checkboxes(self):
         """Handles Select All and Deselect All button clicks."""
         sender = self.sender()
         check_state = Qt.Checked if sender == self.select_all_button else Qt.Unchecked
         
-        # Block signals to prevent triggering _handle_item_changed repeatedly
         self.list_widget.blockSignals(True)
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
@@ -173,13 +175,12 @@ class UpdateCheckDialog(QDialog):
                 item.setCheckState(check_state)
         self.list_widget.blockSignals(False)
         
-        # Manually trigger the update once after batch change
         self._handle_item_changed(None)
 
     def _handle_item_changed(self, item):
         """
         Monitors how many items are checked.
-        If more than 1 item is checked, disable the 'Load Settings' checkbox.
+        If more than 1 item is checked, disable the 'Enable Editing' checkbox.
         """
         checked_count = 0
         for i in range(self.list_widget.count()):
@@ -187,15 +188,15 @@ class UpdateCheckDialog(QDialog):
                 checked_count += 1
         
         if checked_count > 1:
-            self.load_settings_checkbox.setChecked(False)
-            self.load_settings_checkbox.setEnabled(False)
-            self.load_settings_checkbox.setToolTip(
+            self.edit_settings_checkbox.setChecked(False)
+            self.edit_settings_checkbox.setEnabled(False)
+            self.edit_settings_checkbox.setToolTip(
                 self._tr("update_check_multi_selection_warning", 
                          "Editing settings is disabled when multiple profiles are selected.")
             )
         else:
-            self.load_settings_checkbox.setEnabled(True)
-            self.load_settings_checkbox.setToolTip(self._default_checkbox_tooltip)
+            self.edit_settings_checkbox.setEnabled(True)
+            self.edit_settings_checkbox.setToolTip(self._default_checkbox_tooltip)
 
     def on_check_selected(self):
         """Handles the 'Check Selected' button click."""
@@ -221,6 +222,18 @@ class UpdateCheckDialog(QDialog):
         return self.selected_profiles_list
     
     def should_load_into_ui(self):
-        """Returns True if the 'Load settings into UI' checkbox is checked."""
-        # Only return True if it's enabled and checked (double safety)
-        return self.load_settings_checkbox.isEnabled() and self.load_settings_checkbox.isChecked()
+        """
+        Returns True if the settings SHOULD be loaded into the UI.
+        
+        NEW LOGIC: Returns True if exactly ONE profile is selected.
+        It does NOT care about the checkbox state anymore, because we want
+        to load settings even if the user can't edit them.
+        """
+        return len(self.selected_profiles_list) == 1
+    
+    def should_enable_editing(self):
+        """
+        NEW METHOD: Returns True if the user is allowed to edit the settings.
+        This is linked to the checkbox.
+        """
+        return self.edit_settings_checkbox.isEnabled() and self.edit_settings_checkbox.isChecked()

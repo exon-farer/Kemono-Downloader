@@ -19,12 +19,14 @@ class AllcomicDownloadThread(QThread):
     finished_signal = pyqtSignal(int, int, bool) 
     overall_progress_signal = pyqtSignal(int, int) 
 
-    def __init__(self, url, output_dir, parent=None):
+    # 1. Update __init__ to accept proxies
+    def __init__(self, url, output_dir, parent=None, proxies=None):
         super().__init__(parent)
         self.comic_url = url
         self.output_dir = output_dir
         self.is_cancelled = False
         self.pause_event = parent.pause_event if hasattr(parent, 'pause_event') else threading.Event()
+        self.proxies = proxies  # Store the proxies
 
     def _check_pause(self):
         if self.is_cancelled: return True
@@ -40,13 +42,19 @@ class AllcomicDownloadThread(QThread):
         grand_total_dl = 0
         grand_total_skip = 0
 
-        # Create the scraper session ONCE for the entire job
-        scraper = cloudscraper.create_scraper(
-            browser={'browser': 'firefox', 'platform': 'windows', 'desktop': True}
-        )
+        if self.proxies:
+            self.progress_signal.emit(f"   🌍 Network: Using Proxy {self.proxies}")
+        else:
+            self.progress_signal.emit("   🌍 Network: Direct Connection (No Proxy)")
 
-        # Pass the scraper to the function
-        chapters_to_download = allcomic_get_list(scraper, self.comic_url, self.progress_signal.emit)
+        scraper = requests.Session()
+        scraper.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+        })
+
+        # 2. Pass self.proxies to get_chapter_list
+        chapters_to_download = allcomic_get_list(scraper, self.comic_url, self.progress_signal.emit, proxies=self.proxies)
 
         if not chapters_to_download:
             chapters_to_download = [self.comic_url]
@@ -57,8 +65,9 @@ class AllcomicDownloadThread(QThread):
             if self._check_pause(): break
             
             self.progress_signal.emit(f"\n-- Processing Chapter {chapter_idx + 1}/{len(chapters_to_download)} --")
-            # Pass the scraper to the function
-            comic_title, chapter_title, image_urls = allcomic_fetch_data(scraper, chapter_url, self.progress_signal.emit)
+            
+            # 3. Pass self.proxies to fetch_chapter_data
+            comic_title, chapter_title, image_urls = allcomic_fetch_data(scraper, chapter_url, self.progress_signal.emit, proxies=self.proxies)
             
             if not image_urls:
                 self.progress_signal.emit(f"❌ Failed to get data for chapter. Skipping.")
@@ -80,6 +89,9 @@ class AllcomicDownloadThread(QThread):
             self.overall_progress_signal.emit(total_files_in_chapter, 0)
             headers = {'Referer': chapter_url}
 
+            # 4. Define smart timeout for images
+            img_timeout = (30, 120) if self.proxies else 60
+
             for i, img_url in enumerate(image_urls):
                 if self._check_pause(): break
 
@@ -97,8 +109,9 @@ class AllcomicDownloadThread(QThread):
                         if self._check_pause(): break
                         try:
                             self.progress_signal.emit(f"   Downloading ({i+1}/{total_files_in_chapter}): '{filename}' (Attempt {attempt + 1})...")
-                            # Use the persistent scraper object
-                            response = scraper.get(img_url, stream=True, headers=headers, timeout=60)
+                            
+                            # 5. Use proxies, verify=False, and new timeout
+                            response = scraper.get(img_url, stream=True, headers=headers, timeout=img_timeout, proxies=self.proxies, verify=False)
                             response.raise_for_status()
 
                             with open(filepath, 'wb') as f:
@@ -125,7 +138,7 @@ class AllcomicDownloadThread(QThread):
                                 grand_total_skip += 1
                 
                 self.overall_progress_signal.emit(total_files_in_chapter, i + 1)
-                time.sleep(0.5) # Increased delay between images for this site
+                time.sleep(0.5) 
             
             if self._check_pause(): break
 

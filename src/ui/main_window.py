@@ -346,7 +346,7 @@ class DownloaderApp (QWidget ):
         self.download_location_label_widget = None
         self.remove_from_filename_label_widget = None
         self.skip_words_label_widget = None
-        self.setWindowTitle("Kemono Downloader v7.8.0")
+        self.setWindowTitle("Kemono Downloader v7.9.0")
         setup_ui(self)
         self._connect_signals()
         if hasattr(self, 'character_input'):
@@ -366,18 +366,14 @@ class DownloaderApp (QWidget ):
     def add_current_settings_to_queue(self):
         """Saves the current UI settings as a JSON job file with creator-specific paths."""
         
-        # --- Helper: Append Name to Path safely ---
         def get_creator_specific_path(base_dir, folder_name):
             if not folder_name: 
                 return base_dir
             safe_name = clean_folder_name(folder_name)
-            # Avoid double pathing (e.g. if base is .../Artist and we append /Artist again)
+           
             if base_dir.replace('\\', '/').rstrip('/').endswith(safe_name):
                 return base_dir
             return os.path.join(base_dir, safe_name)
-        # ------------------------------------------
-
-        # --- SCENARIO 1: Items from Creator Selection (Popup) ---
         if self.favorite_download_queue:
             count = 0
             base_settings = self._get_current_ui_settings_as_dict()
@@ -407,7 +403,7 @@ class DownloaderApp (QWidget ):
                 QMessageBox.warning(self, "Queue Error", "Failed to add selected items to queue.")
             return
 
-        # --- SCENARIO 2: Manual URL Entry ---
+   
         url = self.link_input.text().strip()
         if not url:
             QMessageBox.warning(self, "Input Error", "Cannot add to queue: URL is empty.")
@@ -416,23 +412,20 @@ class DownloaderApp (QWidget ):
         settings = self._get_current_ui_settings_as_dict()
         settings['api_url'] = url 
         
-        # Attempt to resolve name from URL + Cache (creators.json)
+       
         service, user_id, post_id = extract_post_info(url)
         name_hint = "Job"
         
         if service and user_id:
-            # Try to find name in your local creators cache
+            
             cache_key = (service.lower(), str(user_id))
             cached_name = self.creator_name_cache.get(cache_key)
             
             if cached_name:
-                # CASE A: Creator Found -> Use Creator Name
+                
                 name_hint = cached_name
                 settings['output_dir'] = get_creator_specific_path(settings['output_dir'], cached_name)
             else:
-                # CASE B: Creator NOT Found -> Use Post ID or User ID
-                # If it's a single post link, 'post_id' will have a value.
-                # If it's a profile link, 'post_id' is None, so we use 'user_id'.
                 if post_id:
                     folder_name = str(post_id)
                 else:
@@ -476,7 +469,7 @@ class DownloaderApp (QWidget ):
             QMessageBox.information(self, "Queue Empty", "No job files found in appdata/jobs.")
             return
 
-        # --- FIX: Clear error log at the start of the entire queue session ---
+      
         self.permanently_failed_files_for_dialog.clear()
         self._update_error_button_count()
         # -------------------------------------------------------------------
@@ -2975,6 +2968,25 @@ class DownloaderApp (QWidget ):
         else:
             self.log_signal.emit("ℹ️ Link export was cancelled by the user.")
 
+    def _set_inputs_read_only(self, read_only):
+        """Disables input fields (Read-Only mode) but keeps action buttons enabled."""
+        # List of widgets to disable in Read-Only mode
+        widgets_to_lock = [
+            self.link_input, self.dir_input, self.character_input, 
+            self.skip_words_input, self.remove_from_filename_input,
+            self.custom_folder_input, self.cookie_text_input,
+            self.thread_count_input, self.start_page_input, self.end_page_input,
+            self.use_subfolders_checkbox, self.use_subfolder_per_post_checkbox,
+            self.skip_zip_checkbox, self.download_thumbnails_checkbox,
+            self.compress_images_checkbox, self.scan_content_images_checkbox,
+            self.use_cookie_checkbox, self.manga_mode_checkbox,
+            self.radio_all, self.radio_images, self.radio_videos,
+            self.char_filter_scope_toggle_button, self.skip_scope_toggle_button
+        ]
+        
+        for widget in widgets_to_lock:
+            if widget:
+                widget.setEnabled(not read_only)
 
     def get_filter_mode (self ):
         if self.radio_more and self.radio_more.isChecked():
@@ -3243,7 +3255,6 @@ class DownloaderApp (QWidget ):
                     if self.single_pdf_setting:
                         self.use_subfolder_per_post_checkbox.setChecked(False)
 
-                # --- Logging ---
                 self.log_signal.emit(f"ℹ️ 'More' filter set: {scope_text}, Format: {self.text_export_format.upper()}")
                 if is_any_pdf_mode:
                     status_single = "Enabled" if self.single_pdf_setting else "Disabled"
@@ -3252,19 +3263,18 @@ class DownloaderApp (QWidget ):
                     self.log_signal.emit("   ↳ Multithreading disabled for PDF export.")
 
             else:
-                # --- User clicked Cancel: Revert to default ---
                 self.log_signal.emit("ℹ️ 'More' filter selection cancelled. Reverting to 'All'.")
                 if hasattr(self, 'radio_all'):
                     self.radio_all.setChecked(True)
 
-        # Case 2: Switched AWAY from the "More" button (e.g., clicked 'Images' or 'All')
+       
         elif button != self.radio_more and checked:
             self.radio_more.setText("More")
             self.more_filter_scope = None
             self.single_pdf_setting = False
             self.add_info_in_pdf_setting = False  # Reset setting
             
-            # Restore enabled states for options that PDF mode might have disabled
+            
             if hasattr(self, 'use_multithreading_checkbox'):
                 self.use_multithreading_checkbox.setEnabled(True)
                 self._update_multithreading_for_date_mode() # Re-check manga logic
@@ -4183,8 +4193,11 @@ class DownloaderApp (QWidget ):
 
         self.cancellation_message_logged_this_session = False
         
-        # START of the new refactored block
         service, id1, id2 = extract_post_info(api_url)
+
+        # [NEW] Get proxy settings immediately
+        ui_settings = self._get_current_ui_settings_as_dict()
+        proxies_to_use = ui_settings.get('proxies')
 
         specialized_thread = create_downloader_thread(
             main_app=self,
@@ -4208,18 +4221,18 @@ class DownloaderApp (QWidget ):
 
             self.set_ui_enabled(False)
             self.download_thread = specialized_thread
+            
+            # [NEW] Inject proxies into the thread manually
+            if hasattr(self.download_thread, 'proxies'):
+                self.download_thread.proxies = proxies_to_use
+
             self._connect_specialized_thread_signals(self.download_thread)
             self.download_thread.start()
             self._update_button_states_and_connections()
             return True
-        # END of the new refactored block
-
-        if not service or not id1:
-            QMessageBox.critical(self, "Input Error", "Invalid or unsupported URL format.")
-            return False
 
         user_id, post_id_from_url = id1, id2
-        
+
         if direct_api_url and not post_id_from_url and item_type_from_queue and 'post' in item_type_from_queue:
             self.log_signal.emit(f"❌ CRITICAL ERROR: Could not parse post ID from the queued POST URL: {api_url}")
             self.log_signal.emit("   Skipping this item. This might be due to an unsupported URL format or a temporary issue.")
@@ -5101,8 +5114,54 @@ class DownloaderApp (QWidget ):
         self.is_ready_to_download_batch_update = True
         
         self.progress_label.setText(f"Found {total_posts} new posts. Ready to download.")
-        self.set_ui_enabled(True) # Re-enable UI
-        self._update_button_states_and_connections() # Update buttons to "Start Download (X)"
+        self.set_ui_enabled(True) # Re-enable UI first
+        
+        # [NEW] Apply Read-Only mode if it was selected in the dialog
+        if getattr(self, 'update_settings_read_only_mode', False):
+            self._set_inputs_read_only(True)
+            
+        self._update_button_states_and_connections()
+
+    def _show_update_check_dialog(self):
+        """Shows the Update Check Dialog and applies Load/Edit logic."""
+        if self.is_restore_pending:
+            QMessageBox.warning(self, "Restore Pending", "Please restore or discard the previous session first.")
+            return
+
+        dialog = UpdateCheckDialog(self.user_data_path, self, self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            profiles = dialog.get_selected_profiles()
+            if not profiles: return
+
+            self.active_update_profiles_list = profiles
+            
+            # --- LOGIC START ---
+            
+            # 1. ALWAYS Load Settings if appropriate (e.g. Single Profile selected)
+            # The dialog now returns True for should_load_into_ui() if count == 1, regardless of checkbox
+            if dialog.should_load_into_ui():
+                # Load settings from the FIRST selected profile
+                first_profile_settings = profiles[0]['data'].get('settings', {})
+                self._load_ui_from_settings_dict(first_profile_settings)
+                
+                # 2. Check if Editing is Allowed
+                if dialog.should_enable_editing():
+                    self.update_settings_read_only_mode = False
+                    self.override_update_profile_settings = True # Use UI values for download
+                    self.log_signal.emit("ℹ️ Settings loaded in EDITABLE mode.")
+                else:
+                    self.update_settings_read_only_mode = True
+                    self.override_update_profile_settings = False # Use original JSON values (safer for Read-Only)
+                    self.log_signal.emit("ℹ️ Settings loaded in READ-ONLY mode.")
+            else:
+                # Multiple profiles or load disabled
+                self.update_settings_read_only_mode = False
+                self.override_update_profile_settings = False
+
+            # --- LOGIC END ---
+
+            self._start_batch_update_check(self.active_update_profiles_list)
 
     def _start_download_of_batch_update(self):
         """
@@ -5454,8 +5513,13 @@ class DownloaderApp (QWidget ):
         global PostProcessorWorker, download_from_api
         
         worker_args_template = fetcher_args['worker_args_template']
-        logger_func = lambda msg: self.log_signal.emit(f"[Fetcher] {msg}")
-
+        def logger_func(msg):
+            try:
+                import sip
+                if not sip.isdeleted(self):
+                    self.log_signal.emit(f"[Fetcher] {msg}")
+            except (RuntimeError, ImportError, AttributeError):
+                pass # Window is gone, ignore logging
         try:
             # This single call now handles all fetching logic, including 'Fetch First'.
             post_generator = download_from_api(

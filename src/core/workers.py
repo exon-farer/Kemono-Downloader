@@ -263,7 +263,7 @@ class PostProcessorWorker:
             new_url = parsed_url._replace(netloc=new_domain).geturl()
             
             try:
-                with requests.head(new_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5, allow_redirects=True, proxies=self.proxies) as resp:
+                with requests.head(new_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5, allow_redirects=True, proxies=self.proxies, verify=False) as resp:
                     if resp.status_code == 200:
                         return new_url
             except requests.RequestException:
@@ -338,7 +338,7 @@ class PostProcessorWorker:
                 api_original_filename_for_size_check = file_info.get('_original_name_for_log', file_info.get('name'))
                 try:
                         # Use a stream=True HEAD request to get headers without downloading the body
-                        with requests.head(file_url, headers=file_download_headers, timeout=15, cookies=cookies_to_use_for_file, allow_redirects=True, proxies=self.proxies) as head_response:
+                        with requests.head(file_url, headers=file_download_headers, timeout=15, cookies=cookies_to_use_for_file, allow_redirects=True, proxies=self.proxies, verify=False) as head_response:
                                
                                 head_response.raise_for_status()
                                 content_length = head_response.headers.get('Content-Length')
@@ -673,7 +673,7 @@ class PostProcessorWorker:
                 
                 current_url_to_try = file_url
                           
-                response = requests.get(current_url_to_try, headers=file_download_headers, timeout=(30, 300), stream=True, cookies=cookies_to_use_for_file, proxies=self.proxies)
+                response = requests.get(current_url_to_try, headers=file_download_headers, timeout=(30, 300), stream=True, cookies=cookies_to_use_for_file, proxies=self.proxies, verify=False)
                 
                 if response.status_code == 403 and ('kemono.' in current_url_to_try or 'coomer.' in current_url_to_try):
                     self.logger(f"   ⚠️ Got 403 Forbidden for '{api_original_filename}'. Attempting subdomain rotation...")
@@ -682,7 +682,7 @@ class PostProcessorWorker:
                         self.logger(f"   Retrying with new URL: {new_url}")
                         file_url = new_url
                         response.close() # Close the old response
-                        response = requests.get(new_url, headers=file_download_headers, timeout=(30, 300), stream=True, cookies=cookies_to_use_for_file, proxies=self.proxies)
+                        response = requests.get(new_url, headers=file_download_headers, timeout=(30, 300), stream=True, cookies=cookies_to_use_for_file, proxies=self.proxies, verify=False)
                 response.raise_for_status()
                 
                 # --- REVISED AND MOVED SIZE CHECK LOGIC ---

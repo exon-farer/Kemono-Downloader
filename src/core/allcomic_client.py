@@ -5,7 +5,8 @@ import time
 import random
 from urllib.parse import urlparse
 
-def get_chapter_list(scraper, series_url, logger_func):
+# 1. Update arguments to accept proxies=None
+def get_chapter_list(scraper, series_url, logger_func, proxies=None):
     """
     Checks if a URL is a series page and returns a list of all chapter URLs if it is.
     Relies on a passed-in scraper session for connection.
@@ -16,9 +17,13 @@ def get_chapter_list(scraper, series_url, logger_func):
     response = None
     max_retries = 8
 
+    # 2. Define smart timeout logic
+    req_timeout = (30, 120) if proxies else 30
+
     for attempt in range(max_retries):
         try:
-            response = scraper.get(series_url, headers=headers, timeout=30)
+            # 3. Add proxies, verify=False, and the new timeout
+            response = scraper.get(series_url, headers=headers, timeout=req_timeout, proxies=proxies, verify=False)
             response.raise_for_status()
             logger_func(f"   [AllComic] Successfully connected to series page on attempt {attempt + 1}.")
             break 
@@ -53,7 +58,8 @@ def get_chapter_list(scraper, series_url, logger_func):
         logger_func(f"   [AllComic] ❌ Error parsing chapters after successful connection: {e}")
         return []
 
-def fetch_chapter_data(scraper, chapter_url, logger_func):
+# 4. Update arguments here too
+def fetch_chapter_data(scraper, chapter_url, logger_func, proxies=None):
     """
     Fetches the comic title, chapter title, and image URLs for a single chapter page.
     Relies on a passed-in scraper session for connection.
@@ -64,9 +70,14 @@ def fetch_chapter_data(scraper, chapter_url, logger_func):
     
     response = None
     max_retries = 8
+    
+    # 5. Define smart timeout logic again
+    req_timeout = (30, 120) if proxies else 30
+
     for attempt in range(max_retries):
         try:
-            response = scraper.get(chapter_url, headers=headers, timeout=30)
+            # 6. Add proxies, verify=False, and timeout
+            response = scraper.get(chapter_url, headers=headers, timeout=req_timeout, proxies=proxies, verify=False)
             response.raise_for_status()
             break
         except requests.RequestException as e:

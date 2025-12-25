@@ -2,8 +2,8 @@ import os
 import time
 import requests
 import re
+import random  # Needed for random delays
 from datetime import datetime
-# REMOVED: ThreadPoolExecutor, wait (Not needed for sequential speed)
 from PyQt5.QtCore import QThread, pyqtSignal
 from ...core.deviantart_client import DeviantArtClient
 from ...utils.file_utils import clean_folder_name
@@ -14,24 +14,29 @@ class DeviantArtDownloadThread(QThread):
     overall_progress_signal = pyqtSignal(int, int)
     finished_signal = pyqtSignal(int, int, bool, list)
 
-    def __init__(self, url, output_dir, pause_event, cancellation_event, parent=None):
+    # 1. Accept proxies in init
+    def __init__(self, url, output_dir, pause_event, cancellation_event, parent=None, proxies=None):
         super().__init__(parent)
         self.url = url
         self.output_dir = output_dir
         self.pause_event = pause_event
         self.cancellation_event = cancellation_event
-        
-        # Pass logger to client
-        self.client = DeviantArtClient(logger_func=self.progress_signal.emit)
-        
+        self.proxies = proxies # Store proxies
+                
         self.parent_app = parent 
         self.download_count = 0
         self.skip_count = 0
 
     def run(self):
+        self.client = DeviantArtClient(logger_func=self.progress_signal.emit, proxies=self.proxies)
+
+        if self.proxies:
+             self.progress_signal.emit(f"   🌍 Network: Using Proxy {self.proxies}")
+        else:
+             self.progress_signal.emit("   🌍 Network: Direct Connection")
+
         self.progress_signal.emit("=" * 40)
         self.progress_signal.emit(f"🚀 Starting DeviantArt download for: {self.url}")
-        self.progress_signal.emit(f"   ℹ️ Mode: High-Speed Sequential (Matches 1.py)")
         
         try:
             if not self.client.authenticate():
@@ -87,7 +92,6 @@ class DeviantArtDownloadThread(QThread):
         if not os.path.exists(base_folder):
             os.makedirs(base_folder, exist_ok=True)
 
-        # --- OPTIMIZED LOOP (Matches 1.py structure) ---
         while has_more:
             if self._check_pause_cancel(): break
 
@@ -98,12 +102,14 @@ class DeviantArtDownloadThread(QThread):
 
             if not results: break
 
-            # DIRECT LOOP - No ThreadPoolExecutor overhead
             for deviation in results:
                 if self._check_pause_cancel(): break
                 self._process_deviation_task(deviation, base_folder)
+                
+                # 4. FIX 429: Add a small random delay between items
+                # This prevents hammering the API 24 times in a single second.
+                time.sleep(random.uniform(0.5, 1.2))
 
-            # Be nice to API (1 second sleep per batch of 24)
             time.sleep(1) 
 
     def _process_deviation_task(self, deviation, base_folder):
@@ -113,7 +119,6 @@ class DeviantArtDownloadThread(QThread):
         title = deviation.get('title', 'Unknown')
 
         try:
-            # Try to get content (Handles fallback internally now)
             content = self.client.get_deviation_content(dev_id)
             if content:
                 self._download_file(content['src'], deviation, override_dir=base_folder)
@@ -168,7 +173,6 @@ class DeviantArtDownloadThread(QThread):
                 final_filename = f"{clean_folder_name(new_name)}{ext}"
                 
             except Exception as e:
-                # Reduced logging verbosity slightly for speed
                 pass 
 
         save_dir = override_dir if override_dir else self.output_dir
@@ -185,7 +189,11 @@ class DeviantArtDownloadThread(QThread):
         try:
             self.progress_signal.emit(f"   ⬇️ Downloading: {final_filename}")
             
-            with requests.get(file_url, stream=True, timeout=30) as r:
+            # 5. Determine smart timeout for files
+            timeout_val = (30, 120) if self.proxies else 30
+            
+            # 6. Use proxies and verify=False
+            with requests.get(file_url, stream=True, timeout=timeout_val, proxies=self.proxies, verify=False) as r:
                 r.raise_for_status()
                 
                 with open(filepath, 'wb') as f:

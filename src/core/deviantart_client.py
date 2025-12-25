@@ -11,9 +11,18 @@ class DeviantArtClient:
     CLIENT_SECRET = "76b08c69cfb27f26d6161f9ab6d061a1"
     BASE_API = "https://www.deviantart.com/api/v1/oauth2"
 
-    def __init__(self, logger_func=print):
+    # 1. Accept proxies in init
+    def __init__(self, logger_func=print, proxies=None):
         self.session = requests.Session()
-        # Headers matching 1.py (Firefox)
+        
+        # 2. Configure Session with Proxy & SSL settings immediately
+        if proxies:
+            self.session.proxies.update(proxies)
+            self.session.verify = False # Ignore SSL for proxies
+            self.proxies_enabled = True
+        else:
+            self.proxies_enabled = False
+
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/png,image/svg+xml,*/*;q=0.8",
@@ -41,7 +50,10 @@ class DeviantArtClient:
                 "client_id": self.CLIENT_ID,
                 "client_secret": self.CLIENT_SECRET
             }
-            resp = self.session.post(url, data=data, timeout=10)
+            # 3. Smart timeout (longer if proxy)
+            req_timeout = 30 if self.proxies_enabled else 10
+            
+            resp = self.session.post(url, data=data, timeout=req_timeout)
             resp.raise_for_status()
             data = resp.json()
             self.access_token = data.get("access_token")
@@ -63,18 +75,22 @@ class DeviantArtClient:
         retries = 0
         max_retries = 4
         backoff_delay = 2 
+        
+        # 4. Smart timeout
+        req_timeout = 30 if self.proxies_enabled else 20
 
         while True:
             try:
-                resp = self.session.get(url, params=params, timeout=20)
+                resp = self.session.get(url, params=params, timeout=req_timeout)
                                 
-                # 429: Rate Limit (Retry infinitely like 1.py)
+                # 429: Rate Limit 
                 if resp.status_code == 429:
                     retry_after = resp.headers.get('Retry-After')
                     if retry_after:
-                        sleep_time = int(retry_after) + 1
+                        sleep_time = int(retry_after) + 2 # Add buffer
                     else:
-                        sleep_time = 5 # Default sleep from 1.py
+                        # 5. Increase default wait time for 429s
+                        sleep_time = 15 
                     
                     self._log_once(sleep_time, f"   [DeviantArt] ⚠️ Rate limit (429). Sleeping {sleep_time}s...")
                     time.sleep(sleep_time)
@@ -90,7 +106,7 @@ class DeviantArtClient:
                         raise Exception("Failed to refresh token")
 
                 if 400 <= resp.status_code < 500:
-                    resp.raise_for_status() # This raises immediately, breaking the loop
+                    resp.raise_for_status() 
 
                 if 500 <= resp.status_code < 600:
                     resp.raise_for_status() 
@@ -105,12 +121,9 @@ class DeviantArtClient:
             except requests.exceptions.HTTPError as e:
                 if e.response is not None and 400 <= e.response.status_code < 500:
                     raise e
-                
-                # Otherwise fall through to general retry logic (for 5xx)
                 pass
 
             except requests.exceptions.RequestException as e:
-                # Network errors / 5xx errors -> Retry
                 if retries < max_retries:
                     self._log_once("conn_error", f"   [DeviantArt] Connection error: {e}. Retrying...")
                     time.sleep(backoff_delay)
@@ -131,7 +144,8 @@ class DeviantArtClient:
     def get_deviation_uuid(self, url):
         """Scrapes the deviation page to find the UUID."""
         try:
-            resp = self.session.get(url, timeout=15)
+            req_timeout = 30 if self.proxies_enabled else 15
+            resp = self.session.get(url, timeout=req_timeout)
             match = re.search(r'"deviationUuid":"([^"]+)"', resp.text)
             if match:
                 return match.group(1)
@@ -144,17 +158,13 @@ class DeviantArtClient:
 
     def get_deviation_content(self, uuid):
         """Fetches download info."""
-        # 1. Try high-res download endpoint
         try:
             data = self._api_call(f"/deviation/download/{uuid}")
             if 'src' in data:
                 return data
         except:
-            # If 400/403 (Not downloadable), we fail silently here 
-            # and proceed to step 2 (Metadata fallback)
             pass
         
-        # 2. Fallback to standard content
         try:
             meta = self._api_call(f"/deviation/{uuid}")
             if 'content' in meta:

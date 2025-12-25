@@ -40,8 +40,11 @@ def fetch_posts_paginated(api_url_base, headers, offset, logger, cancellation_ev
             log_message += f" (Attempt {attempt + 1}/{max_retries})"
         logger(log_message)
 
+        request_timeout = (30, 120) if proxies else (15, 60)
+        
         try:
-            with requests.get(paginated_url, headers=headers, timeout=(15, 60), cookies=cookies_dict, proxies=proxies) as response:
+            with requests.get(paginated_url, headers=headers, timeout=request_timeout, cookies=cookies_dict, proxies=proxies, verify=False) as response:
+              
                 response.raise_for_status()
                 response.encoding = 'utf-8'  
                 return response.json()
@@ -92,7 +95,11 @@ def fetch_single_post_data(api_domain, service, user_id, post_id, headers, logge
     scraper = None
     try:
         scraper = cloudscraper.create_scraper()
-        response = scraper.get(post_api_url, headers=headers, timeout=(15, 300), cookies=cookies_dict, proxies=proxies)
+        # Keep the 300s read timeout for both, but increase connect timeout for proxies
+        request_timeout = (30, 300) if proxies else (15, 300)
+        
+        response = scraper.get(post_api_url, headers=headers, timeout=request_timeout, cookies=cookies_dict, proxies=proxies, verify=False)
+      
         response.raise_for_status()
 
         full_post_data = response.json()
@@ -120,7 +127,9 @@ def fetch_post_comments(api_domain, service, user_id, post_id, headers, logger, 
     logger(f"   Fetching comments: {comments_api_url}")
     
     try:
-        with requests.get(comments_api_url, headers=headers, timeout=(10, 30), cookies=cookies_dict, proxies=proxies) as response:
+        request_timeout = (30, 60) if proxies else (10, 30)
+        
+        with requests.get(comments_api_url, headers=headers, timeout=request_timeout, cookies=cookies_dict, proxies=proxies, verify=False) as response:
             response.raise_for_status()
             response.encoding = 'utf-8'          
             return response.json()
@@ -180,7 +189,9 @@ def download_from_api(
         direct_post_api_url = f"https://{api_domain}/api/v1/{service}/user/{user_id}/post/{target_post_id}"
         logger(f"   Attempting direct fetch for target post: {direct_post_api_url}")
         try:
-            with requests.get(direct_post_api_url, headers=headers, timeout=(10, 30), cookies=cookies_for_api, proxies=proxies) as direct_response:
+            request_timeout = (30, 60) if proxies else (10, 30)
+            
+            with requests.get(direct_post_api_url, headers=headers, timeout=request_timeout, cookies=cookies_for_api, proxies=proxies, verify=False) as direct_response:
                 direct_response.raise_for_status()
                 direct_response.encoding = 'utf-8' 
                 direct_post_data = direct_response.json()
