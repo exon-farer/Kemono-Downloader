@@ -15,7 +15,6 @@ from ..config.constants import (
     STYLE_POST_TITLE_GLOBAL_NUMBERING
 )
 
-# --- NEW: Custom Adapter to fix SSL errors ---
 class CustomSSLAdapter(HTTPAdapter):
     """
     A custom HTTPAdapter that forces check_hostname=False when using SSL.
@@ -130,13 +129,13 @@ def fetch_single_post_data(api_domain, service, user_id, post_id, headers, logge
             
             response = scraper.get(post_api_url, headers=headers, timeout=request_timeout, cookies=cookies_dict, proxies=proxies, verify=False)
         
-            # --- FIX: Handle 429 Rate Limit explicitly ---
+            
             if response.status_code == 429:
                 wait_time = 20 + (attempt * 10) # 20s, 30s, 40s...
                 logger(f"      ⚠️ Rate Limited (429) on post {post_id}. Waiting {wait_time} seconds before retrying...")
                 time.sleep(wait_time)
                 continue # Try loop again
-            # ---------------------------------------------
+           
 
             response.raise_for_status()
 
@@ -266,11 +265,9 @@ def download_from_api(
     if target_post_id and (start_page or end_page):
         logger("⚠️ Page range (start/end page) is ignored when a specific post URL is provided (searching all pages for the post).")
 
-    # --- FIXED LOGIC HERE ---
-    # Define which styles require fetching ALL posts first (Sequential Mode)
+
     styles_requiring_fetch_all = [STYLE_DATE_BASED, STYLE_POST_TITLE_GLOBAL_NUMBERING]
 
-    # Only enable "fetch all and sort" if the current style is explicitly in the list above
     is_manga_mode_fetch_all_and_sort_oldest_first = (
         manga_mode and 
         (manga_filename_style_for_sort_check in styles_requiring_fetch_all) and 

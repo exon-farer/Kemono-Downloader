@@ -686,7 +686,6 @@ class PostProcessorWorker:
                         response = requests.get(new_url, headers=file_download_headers, timeout=(30, 300), stream=True, cookies=cookies_to_use_for_file, proxies=self.proxies, verify=False)
                 response.raise_for_status()
                 
-                # --- REVISED AND MOVED SIZE CHECK LOGIC ---
                 total_size_bytes = int(response.headers.get('Content-Length', 0))
 
                 if self.skip_file_size_mb is not None:
@@ -695,8 +694,7 @@ class PostProcessorWorker:
                         if file_size_mb < self.skip_file_size_mb:
                             self.logger(f"   -> Skip File (Size): '{api_original_filename}' is {file_size_mb:.2f} MB, which is smaller than the {self.skip_file_size_mb} MB limit.")
                             return 0, 1, api_original_filename, False, FILE_DOWNLOAD_STATUS_SKIPPED, None
-                    # If Content-Length is missing, we can't check, so we no longer log a warning here and just proceed.
-                # --- END OF REVISED LOGIC ---
+
 
                 num_parts_for_file = min(self.multipart_parts_count, MAX_PARTS_FOR_MULTIPART_DOWNLOAD)
            

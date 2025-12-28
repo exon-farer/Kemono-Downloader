@@ -1,8 +1,8 @@
 import requests
 import re
-from bs4 import BeautifulSoup  # Optional, but regex is faster for this specific site
+from bs4 import BeautifulSoup 
 
-# Logic derived from NHdownloader.sh 'hentaifox' function
+
 BASE_URL = "https://hentaifox.com"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -25,11 +25,10 @@ def get_gallery_metadata(gallery_id):
     response.raise_for_status()
     html = response.text
     
-    # Extract Title (Bash: grep -o '<title>.*</title>')
+
     title_match = re.search(r'<title>(.*?)</title>', html)
     title = title_match.group(1).replace(" - HentaiFox", "").strip() if title_match else f"Gallery {gallery_id}"
-    
-    # Extract Total Pages (Bash: grep -Eo 'Pages: [0-9]*')
+
     pages_match = re.search(r'Pages: (\d+)', html)
     if not pages_match:
         raise ValueError("Could not find total pages count.")

@@ -6636,11 +6636,11 @@ class DownloaderApp (QWidget ):
                     # Look up the name in the cache, falling back to the ID if not found.
                     creator_name = self.creator_name_cache.get((service, user_id), user_id) 
                     
-                    # Add the new 'creator_name' key to the format_values dictionary.
+                  .
                     format_values = { 
                         'id': str(job_details.get('original_post_id_for_log', '')), 
                         'user': user_id, 
-                        'creator_name': creator_name, # <-- ADDED
+                        'creator_name': creator_name, 
                         'service': str(job_details.get('service', '')), 
                         'title': post_title, 
                         'name': base, 
@@ -7075,7 +7075,6 @@ class DownloaderApp (QWidget ):
 
         self.log_signal.emit(f"   Fetched a total of {len(all_posts_from_api)} posts from the server.")
         
-        # CORRECTED LINE: Assign the list directly without re-filtering
         self.new_posts_for_update = all_posts_from_api
         
         if not self.new_posts_for_update:
@@ -7103,7 +7102,6 @@ class DownloaderApp (QWidget ):
         self.log_signal.emit(f"   Update session will save to base folder: {base_download_dir_from_ui}")
 
         raw_character_filters_text = self.character_input.text().strip()
-        # FIX: Parse both filters and commands from the input string
         parsed_character_filter_objects, download_commands = self._parse_character_filters(raw_character_filters_text)
 
         try:
@@ -7181,11 +7179,7 @@ class DownloaderApp (QWidget ):
             'single_pdf_mode': self.single_pdf_setting, 
             'project_root_dir': self.app_base_dir,
             'processed_post_ids': list(self.active_update_profile['processed_post_ids']),
-            
-            # FIX: Use the parsed commands dictionary to get the sfp_threshold
             'sfp_threshold': download_commands.get('sfp_threshold'),
-            
-            # FIX: Add all the missing keys
             'date_prefix_format': self.date_prefix_format,
             'domain_override': download_commands.get('domain_override'),
             'archive_only_mode': download_commands.get('archive_only', False),
@@ -7218,11 +7212,9 @@ class DownloaderApp (QWidget ):
         dialog = EmptyPopupDialog(self.user_data_path, self)
         if dialog.exec_() == QDialog.Accepted:
             
-# --- START OF MODIFICATION ---
+
             if hasattr(dialog, 'update_profiles_list') and dialog.update_profiles_list:
                 self.active_update_profiles_list = dialog.update_profiles_list
-                
-                # --- NEW LOGIC: Check if user wants to load settings into UI ---
                 load_settings_requested = getattr(dialog, 'load_settings_into_ui_requested', False)
                 self.override_update_profile_settings = load_settings_requested 
                 
@@ -7239,7 +7231,7 @@ class DownloaderApp (QWidget ):
                 self.link_input.setText(f"{len(self.active_update_profiles_list)} profiles loaded for update check...")
                 
                 self._start_batch_update_check(self.active_update_profiles_list)
-            # --- END OF MODIFICATION ---           
+
            
             elif hasattr(dialog, 'selected_creators_for_queue') and dialog.selected_creators_for_queue:
                 self.active_update_profile = None # Ensure single update mode is off
@@ -7488,17 +7480,13 @@ class DownloaderApp (QWidget ):
 
         should_create_artist_folder = False
       
-# --- Check for popup selection scope ---
+
         if item_type == 'creator_popup_selection' and item_scope == EmptyPopupDialog.SCOPE_CREATORS:
-            should_create_artist_folder = True
-        # --- Check for global "Artist Folders" scope ---
+            should_create_artist_folder = True 
         elif item_type != 'creator_popup_selection' and self.favorite_download_scope == FAVORITE_SCOPE_ARTIST_FOLDERS:
             should_create_artist_folder = True
-            
-        # --- NEW: Check for forced folder flag from batch ---
         if self.current_processing_favorite_item_info.get('force_artist_folder'):
             should_create_artist_folder = True
-        # ---------------------------------------------------
        
         if should_create_artist_folder and main_download_dir:
             folder_name_key = self.current_processing_favorite_item_info.get('name_for_folder', 'Unknown_Folder')

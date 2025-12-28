@@ -75,11 +75,6 @@ def add_metadata_page(pdf, post, font_family):
         if link_url:
             # Styling for clickable link: Blue + Underline
             pdf.set_text_color(0, 0, 255)
-            # Check if font supports underline style directly or just use 'U'
-            # FPDF standard allows 'U' in style string.
-            # We use 'U' combined with the font family. 
-            # Note: DejaVu implementation in fpdf2 might handle 'U' automatically or ignore it depending on version,
-            # but setting text color indicates link clearly enough usually.
             pdf.set_font(font_family, 'U', 11) 
             
             # Pass the URL to the 'link' parameter
@@ -131,9 +126,9 @@ def create_individual_pdf(post_data, output_filename, font_path, add_info_page=F
     font_family = _setup_pdf_fonts(pdf, font_path, logger)
     
     if add_info_page:
-        # add_metadata_page adds the page start itself
+f
         add_metadata_page(pdf, post_data, font_family)
-        # REMOVED: pdf.add_page() <-- This ensures content starts right below the line
+
     else:
         pdf.add_page()
 
@@ -210,7 +205,6 @@ def create_single_pdf_from_content(posts_data, output_filename, font_path, add_i
     for i, post in enumerate(posts_data):
         if add_info_page:
             add_metadata_page(pdf, post, font_family)
-            # REMOVED: pdf.add_page() <-- This ensures content starts right below the line
         else:
             pdf.add_page()
 
