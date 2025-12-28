@@ -106,6 +106,7 @@ from .classes.external_link_downloader_thread import ExternalLinkDownloadThread
 from .classes.nhentai_downloader_thread import NhentaiDownloadThread
 from .classes.downloader_factory import create_downloader_thread
 from .classes.kemono_discord_downloader_thread import KemonoDiscordDownloadThread
+from .classes.hentaifox_downloader_thread import HentaiFoxDownloadThread
 
 _ff_ver = (datetime.date.today().toordinal() - 735506) // 28
 USERAGENT_FIREFOX = (f"Mozilla/5.0 (Windows NT 10.0; Win64; x64; "
@@ -309,6 +310,9 @@ class DownloaderApp (QWidget ):
         self.downloaded_hash_counts_lock = threading.Lock()
         self.session_temp_files = []
         self.single_pdf_mode = False
+
+        self.temp_pdf_content_list = []
+        self.last_effective_download_dir = None
         self.save_creator_json_enabled_this_session = True 
         self.date_prefix_format = self.settings.value(DATE_PREFIX_FORMAT_KEY, "YYYY-MM-DD {post}", type=str)
         self.is_single_post_session = False 
@@ -346,7 +350,7 @@ class DownloaderApp (QWidget ):
         self.download_location_label_widget = None
         self.remove_from_filename_label_widget = None
         self.skip_words_label_widget = None
-        self.setWindowTitle("Kemono Downloader v7.9.0")
+        self.setWindowTitle("Kemono Downloader v7.9.1")
         setup_ui(self)
         self._connect_signals()
         if hasattr(self, 'character_input'):
@@ -3918,7 +3922,11 @@ class DownloaderApp (QWidget ):
                     'txt_file': 'coomer.txt',
                     'url_regex': r'https?://(?:www\.)?coomer\.(?:su|party|st)/[^/\s]+/user/[^/\s]+(?:/post/\d+)?/?'
                 },
-
+                'hentaifox.com': {
+                    'name': 'HentaiFox',
+                    'txt_file': 'hentaifox.txt',
+                    'url_regex': r'https?://(?:www\.)?hentaifox\.com/(?:g|gallery)/\d+/?'
+                },
                 'allporncomic.com': {
                     'name': 'AllPornComic',
                     'txt_file': 'allporncomic.txt',
@@ -3999,7 +4007,8 @@ class DownloaderApp (QWidget ):
                     'toonily.com', 'toonily.me',
                     'hentai2read.com',
                     'saint2.su', 'saint2.pk',
-                    'imgur.com', 'bunkr.'
+                    'imgur.com', 'bunkr.',
+                    'hentaifox.com'
                 ]
 
                 for url in urls_to_download:
@@ -4087,6 +4096,7 @@ class DownloaderApp (QWidget ):
 
         self._clear_stale_temp_files()
         self.session_temp_files = []
+        self.temp_pdf_content_list = []
 
         processed_post_ids_for_restore = []
         manga_counters_for_restore = None
@@ -4170,6 +4180,7 @@ class DownloaderApp (QWidget ):
                     return False
             effective_output_dir_for_run = os.path.normpath(main_ui_download_dir) if main_ui_download_dir else ""
 
+        self.last_effective_download_dir = effective_output_dir_for_run
         if not is_restore:
             self._create_initial_session_file(api_url, effective_output_dir_for_run, remaining_queue=self.favorite_download_queue)
 
@@ -5600,8 +5611,18 @@ class DownloaderApp (QWidget ):
              permanent, history_data,
              temp_filepath) = result_tuple
 
-            if temp_filepath: self.session_temp_files.append(temp_filepath)
-            
+            if temp_filepath: 
+                self.session_temp_files.append(temp_filepath)
+                
+                # If Single PDF mode is enabled, we need to load the data 
+                # from the temp file into memory for the final aggregation.
+                if self.single_pdf_setting:
+                    try:
+                        with open(temp_filepath, 'r', encoding='utf-8') as f:
+                            post_content_data = json.load(f)
+                            self.temp_pdf_content_list.append(post_content_data)
+                    except Exception as e:
+                        self.log_signal.emit(f"⚠️ Error reading temp file for PDF aggregation: {e}")            
             with self.downloaded_files_lock:
                 self.download_counter += downloaded
                 self.skip_counter += skipped
@@ -5627,47 +5648,73 @@ class DownloaderApp (QWidget ):
             self.finished_signal.emit(self.download_counter, self.skip_counter, self.cancellation_event.is_set(), self.all_kept_original_filenames)
 
     def _trigger_single_pdf_creation(self):
-        """Reads temp files, sorts them by date, then creates the single PDF."""
-        self.log_signal.emit("="*40)
-        self.log_signal.emit("Creating single PDF from collected text files...")
-
-        posts_content_data = []
-        for temp_filepath in self.session_temp_files:
-            try:
-                with open(temp_filepath, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    posts_content_data.append(data)
-            except Exception as e:
-                self.log_signal.emit(f"   ⚠️ Could not read temp file '{temp_filepath}': {e}")
-        
-        if not posts_content_data:
-            self.log_signal.emit("   No content was collected. Aborting PDF creation.")
+        """
+        Triggers the creation of a single PDF from collected text content in a BACKGROUND THREAD.
+        """
+        if not self.temp_pdf_content_list:
+            self.log_signal.emit("⚠️ No content collected for Single PDF.")
             return
 
-        output_dir = self.dir_input.text().strip() or QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)
-        default_filename = os.path.join(output_dir, "Consolidated_Content.pdf")
-        filepath, _ = QFileDialog.getSaveFileName(self, "Save Single PDF", default_filename, "PDF Files (*.pdf)")
+        # 1. Sort the content
+        self.log_signal.emit("   Sorting collected content for PDF...")
+        def sort_key(post):
+            p_date = post.get('published') or "0000-00-00"
+            a_date = post.get('added') or "0000-00-00"
+            pid = post.get('id') or "0"
+            return (p_date, a_date, pid)
 
-        if not filepath:
-            self.log_signal.emit("   Single PDF creation cancelled by user.")
-            return
+        sorted_content = sorted(self.temp_pdf_content_list, key=sort_key)
 
-        if not filepath.lower().endswith('.pdf'):
-            filepath += '.pdf'
+        # 2. Determine Filename
+        first_post = sorted_content[0]
+        creator_name = first_post.get('creator_name') or first_post.get('user') or "Unknown_Creator"
+        clean_creator = clean_folder_name(creator_name)
         
+        filename = f"[{clean_creator}] Complete_Collection.pdf"
+        
+        # --- FIX 3: Corrected Fallback Logic ---
+        # Use the stored dir, or fall back to the text input in the UI, or finally the app root
+        base_dir = self.last_effective_download_dir
+        if not base_dir:
+            base_dir = self.dir_input.text().strip()
+        if not base_dir:
+             base_dir = self.app_base_dir
+             
+        output_path = os.path.join(base_dir, filename)
+        # ---------------------------------------
+
+        # 3. Get Options
         font_path = os.path.join(self.app_base_dir, 'data', 'dejavu-sans', 'DejaVuSans.ttf')
-        
-        self.log_signal.emit("   Sorting collected posts by date (oldest first)...")
-        sorted_content = sorted(posts_content_data, key=lambda x: x.get('published', 'Z'))
+        # Get 'Add Info Page' preference
+        add_info = True 
+        if hasattr(self, 'more_options_dialog') and self.more_options_dialog:
+            add_info = self.more_options_dialog.get_add_info_state()
+        elif hasattr(self, 'add_info_in_pdf_setting'):
+            add_info = self.add_info_in_pdf_setting
 
-        create_single_pdf_from_content(
-            sorted_content, 
-            filepath, 
-            font_path, 
-            add_info_page=self.add_info_in_pdf_setting, # Pass the flag here
-            logger=self.log_signal.emit
+        # 4. START THE THREAD
+        self.pdf_thread = PdfGenerationThread(
+            posts_data=sorted_content,
+            output_filename=output_path,
+            font_path=font_path,
+            add_info_page=add_info,
+            logger_func=self.log_signal.emit
         )
-        self.log_signal.emit("="*40)
+
+        self.pdf_thread.finished_signal.connect(self._on_pdf_generation_finished)
+        self.pdf_thread.start()
+
+    def _on_pdf_generation_finished(self, success, message):
+        """Callback for when the PDF thread is done."""
+        if success:
+            self.log_signal.emit(f"✅ {message}")
+            QMessageBox.information(self, "PDF Created", message)
+        else:
+            self.log_signal.emit(f"❌ PDF Creation Error: {message}")
+            QMessageBox.warning(self, "PDF Error", f"Could not create PDF: {message}")
+        
+        # Optional: Clear the temp list now that we are done
+        self.temp_pdf_content_list = []
 
     def _add_to_history_candidates(self, history_data):
         """Adds processed post data to the history candidates list and updates the creator profile."""        
@@ -7469,3 +7516,35 @@ class DownloaderApp (QWidget ):
         if not success_starting_download:
             self.log_signal.emit(f"⚠️ Failed to initiate download for '{item_display_name}'. Skipping and moving to the next item in queue.")
             QTimer.singleShot(100, self._process_next_favorite_download)
+
+class PdfGenerationThread(QThread):
+    finished_signal = pyqtSignal(bool, str) # success, message
+
+    def __init__(self, posts_data, output_filename, font_path, add_info_page, logger_func):
+        super().__init__()
+        self.posts_data = posts_data
+        self.output_filename = output_filename
+        self.font_path = font_path
+        self.add_info_page = add_info_page
+        self.logger_func = logger_func
+
+    def run(self):
+        try:
+            from .dialogs.SinglePDF import create_single_pdf_from_content
+            self.logger_func("📄 Background Task: Generating Single PDF... (This may take a while)")
+            
+            success = create_single_pdf_from_content(
+                self.posts_data,
+                self.output_filename,
+                self.font_path,
+                self.add_info_page,
+                logger=self.logger_func
+            )
+            
+            if success:
+                self.finished_signal.emit(True, f"PDF Saved: {os.path.basename(self.output_filename)}")
+            else:
+                self.finished_signal.emit(False, "PDF generation failed.")
+                
+        except Exception as e:
+            self.finished_signal.emit(False, str(e))            

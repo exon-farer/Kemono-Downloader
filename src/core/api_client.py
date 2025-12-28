@@ -4,6 +4,10 @@ from urllib.parse import urlparse
 import json
 import requests
 import cloudscraper 
+import ssl
+from requests.adapters import HTTPAdapter
+from urllib3.poolmanager import PoolManager
+
 from ..utils.network_utils import extract_post_info, prepare_cookies_for_request
 from ..config.constants import (
     STYLE_DATE_POST_TITLE,
@@ -11,6 +15,24 @@ from ..config.constants import (
     STYLE_POST_TITLE_GLOBAL_NUMBERING
 )
 
+# --- NEW: Custom Adapter to fix SSL errors ---
+class CustomSSLAdapter(HTTPAdapter):
+    """
+    A custom HTTPAdapter that forces check_hostname=False when using SSL.
+    This prevents the 'Cannot set verify_mode to CERT_NONE' error.
+    """
+    def init_poolmanager(self, connections, maxsize, block=False):
+        ctx = ssl.create_default_context()
+        # Crucial: Disable hostname checking FIRST, then set verify mode
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
+        self.poolmanager = PoolManager(
+            num_pools=connections,
+            maxsize=maxsize,
+            block=block,
+            ssl_context=ctx
+        )
 
 def fetch_posts_paginated(api_url_base, headers, offset, logger, cancellation_event=None, pause_event=None, cookies_dict=None, proxies=None):
     """
@@ -87,36 +109,62 @@ def fetch_posts_paginated(api_url_base, headers, offset, logger, cancellation_ev
 def fetch_single_post_data(api_domain, service, user_id, post_id, headers, logger, cookies_dict=None, proxies=None):
     """
     Fetches the full data, including the 'content' field, for a single post using cloudscraper.
+    Includes RETRY logic for 429 Rate Limit errors.
     """
     post_api_url = f"https://{api_domain}/api/v1/{service}/user/{user_id}/post/{post_id}"
     logger(f"      Fetching full content for post ID {post_id}...")
 
-    # FIX: Ensure scraper session is closed after use
-    scraper = None
-    try:
-        scraper = cloudscraper.create_scraper()
-        # Keep the 300s read timeout for both, but increase connect timeout for proxies
-        request_timeout = (30, 300) if proxies else (15, 300)
+    # Retry settings
+    max_retries = 4
+    
+    for attempt in range(max_retries + 1):
+        scraper = None
+        try:
+            scraper = cloudscraper.create_scraper()
+            
+            # Mount custom SSL adapter
+            adapter = CustomSSLAdapter()
+            scraper.mount("https://", adapter)
+
+            request_timeout = (30, 300) if proxies else (15, 300)
+            
+            response = scraper.get(post_api_url, headers=headers, timeout=request_timeout, cookies=cookies_dict, proxies=proxies, verify=False)
         
-        response = scraper.get(post_api_url, headers=headers, timeout=request_timeout, cookies=cookies_dict, proxies=proxies, verify=False)
-      
-        response.raise_for_status()
+            # --- FIX: Handle 429 Rate Limit explicitly ---
+            if response.status_code == 429:
+                wait_time = 20 + (attempt * 10) # 20s, 30s, 40s...
+                logger(f"      ⚠️ Rate Limited (429) on post {post_id}. Waiting {wait_time} seconds before retrying...")
+                time.sleep(wait_time)
+                continue # Try loop again
+            # ---------------------------------------------
 
-        full_post_data = response.json()
+            response.raise_for_status()
 
-        if isinstance(full_post_data, list) and full_post_data:
-            return full_post_data[0] 
-        if isinstance(full_post_data, dict) and 'post' in full_post_data:
-            return full_post_data['post'] 
-        return full_post_data 
+            full_post_data = response.json()
 
-    except Exception as e:
-        logger(f"      ❌ Failed to fetch full content for post {post_id}: {e}")
-        return None
-    finally:
-        if scraper:
-            scraper.close()
+            if isinstance(full_post_data, list) and full_post_data:
+                return full_post_data[0] 
+            if isinstance(full_post_data, dict) and 'post' in full_post_data:
+                return full_post_data['post'] 
+            return full_post_data 
 
+        except Exception as e:
+            # Catch "Too Many Requests" if it wasn't caught by status_code check above
+            if "429" in str(e) or "Too Many Requests" in str(e):
+                if attempt < max_retries:
+                    wait_time = 20 + (attempt * 10)
+                    logger(f"      ⚠️ Rate Limit Error caught: {e}. Waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+            
+            # Only log error if this was the last attempt
+            if attempt == max_retries:
+                logger(f"      ❌ Failed to fetch full content for post {post_id} after {max_retries} retries: {e}")
+                return None
+        finally:
+            if scraper:
+                scraper.close()
+    return None
         
 def fetch_post_comments(api_domain, service, user_id, post_id, headers, logger, cancellation_event=None, pause_event=None, cookies_dict=None, proxies=None):
     """Fetches all comments for a specific post."""

@@ -1,5 +1,7 @@
 import os
 import re
+import sys 
+
 try:
     from fpdf import FPDF
     FPDF_AVAILABLE = True
@@ -18,7 +20,9 @@ try:
             self.set_font(self.font_family_main, '', 8)
             self.cell(0, 10, 'Page ' + str(self.page_no()), 0, 0, 'C')
 
-except ImportError:
+except Exception as e:
+    print(f"\n❌ DEBUG INFO: Import failed. The specific error is: {e}")
+    print(f"❌ DEBUG INFO: Python running this script is located at: {sys.executable}\n")
     FPDF_AVAILABLE = False
     FPDF = None 
     PDF = None
@@ -244,6 +248,9 @@ def create_single_pdf_from_content(posts_data, output_filename, font_path, add_i
             pdf.multi_cell(w=0, h=7, txt=post.get('content', 'No Content'))
     
     try:
+        output_dir = os.path.dirname(output_filename)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)        
         pdf.output(output_filename)
         logger(f"✅ Successfully created single PDF: '{os.path.basename(output_filename)}'")
         return True

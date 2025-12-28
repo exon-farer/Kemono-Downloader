@@ -1,0 +1,136 @@
+import os
+import time
+import requests
+from PyQt5.QtCore import QThread, pyqtSignal
+from ...core.hentaifox_client import get_gallery_metadata, get_image_link_for_page, get_gallery_id
+from ...utils.file_utils import clean_folder_name
+
+class HentaiFoxDownloadThread(QThread):
+    progress_signal = pyqtSignal(str)  # Log messages
+    file_progress_signal = pyqtSignal(str, object) # filename, (current_bytes, total_bytes)
+    # finished_signal: (downloaded_count, skipped_count, was_cancelled, kept_files_list)
+    finished_signal = pyqtSignal(int, int, bool, list) 
+
+    def __init__(self, url_or_id, output_dir, parent=None):
+        super().__init__(parent)
+        self.gallery_id = get_gallery_id(url_or_id)
+        self.output_dir = output_dir
+        self.is_running = True
+        self.downloaded_count = 0
+        self.skipped_count = 0
+
+    def run(self):
+        try:
+            self.progress_signal.emit(f"🔍 [HentaiFox] Fetching metadata for ID: {self.gallery_id}...")
+            
+            # 1. Get Info
+            try:
+                data = get_gallery_metadata(self.gallery_id)
+            except Exception as e:
+                self.progress_signal.emit(f"❌ [HentaiFox] Failed to fetch metadata: {e}")
+                self.finished_signal.emit(0, 0, False, [])
+                return
+
+            title = clean_folder_name(data['title'])
+            total_pages = data['total_pages']
+            
+            # 2. Setup Folder
+            save_folder = os.path.join(self.output_dir, f"[{self.gallery_id}] {title}")
+            os.makedirs(save_folder, exist_ok=True)
+            
+            self.progress_signal.emit(f"📂 Saving to: {save_folder}")
+            self.progress_signal.emit(f"📄 Found {total_pages} pages. Starting download...")
+
+            # 3. Iterate and Download
+            for i in range(1, total_pages + 1):
+                if not self.is_running: 
+                    self.progress_signal.emit("🛑 Download cancelled by user.")
+                    break
+                
+                # Fetch image link for this specific page
+                try:
+                    img_url = get_image_link_for_page(self.gallery_id, i)
+                    
+                    if img_url:
+                        ext = img_url.split('.')[-1]
+                        filename = f"{i:03d}.{ext}"
+                        filepath = os.path.join(save_folder, filename)
+                        
+                        # Check if exists
+                        if os.path.exists(filepath):
+                            self.progress_signal.emit(f"⚠️ [{i}/{total_pages}] Skipped (Exists): {filename}")
+                            self.skipped_count += 1
+                        else:
+                            self.progress_signal.emit(f"⬇️ [{i}/{total_pages}] Downloading: {filename}")
+                            
+                            # CALL NEW DOWNLOAD FUNCTION
+                            success = self.download_image_with_progress(img_url, filepath, filename)
+                            
+                            if success:
+                                self.progress_signal.emit(f"✅ [{i}/{total_pages}] Finished: {filename}")
+                                self.downloaded_count += 1
+                            else:
+                                self.progress_signal.emit(f"❌ [{i}/{total_pages}] Failed: {filename}")
+                                self.skipped_count += 1
+                    else:
+                        self.progress_signal.emit(f"❌ [{i}/{total_pages}] Error: No image link found.")
+                        self.skipped_count += 1
+
+                except Exception as e:
+                    self.progress_signal.emit(f"❌ [{i}/{total_pages}] Exception: {e}")
+                    self.skipped_count += 1
+
+                time.sleep(0.5) 
+
+            # 4. Final Summary
+            summary = (
+                f"\n🏁 [HentaiFox] Task Complete!\n"
+                f"   - Total: {total_pages}\n"
+                f"   - Downloaded: {self.downloaded_count}\n"
+                f"   - Skipped: {self.skipped_count}\n"
+            )
+            self.progress_signal.emit(summary)
+
+        except Exception as e:
+            self.progress_signal.emit(f"❌ Critical Error: {str(e)}")
+        
+        self.finished_signal.emit(self.downloaded_count, self.skipped_count, not self.is_running, [])
+
+    def download_image_with_progress(self, url, path, filename):
+        """Downloads file while emitting byte-level progress signals."""
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Referer": "https://hentaifox.com/"
+        }
+        
+        try:
+            # stream=True is required to get size before downloading body
+            r = requests.get(url, headers=headers, stream=True, timeout=20)
+            if r.status_code != 200:
+                return False
+            
+            # Get Total Size (in bytes)
+            total_size = int(r.headers.get('content-length', 0))
+            downloaded_size = 0
+            
+            chunk_size = 1024 # 1KB chunks
+            
+            with open(path, 'wb') as f:
+                for chunk in r.iter_content(chunk_size):
+                    if not self.is_running:
+                        r.close()
+                        return False
+                        
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        
+                        self.file_progress_signal.emit(filename, (downloaded_size, total_size))
+            
+            return True
+        except Exception as e:
+            print(f"Download Error: {e}")
+            return False
+
+    def stop(self):
+        self.is_running = False

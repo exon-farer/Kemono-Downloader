@@ -62,7 +62,8 @@ def robust_clean_name(name):
     """A more robust function to remove illegal characters for filenames and folders."""
     if not name:
         return ""
-    illegal_chars_pattern = r'[\x00-\x1f<>:"/\\|?*\']'
+    # FIX: Removed \' from the list so apostrophes are kept
+    illegal_chars_pattern = r'[\x00-\x1f<>:"/\\|?*]' 
     cleaned_name = re.sub(illegal_chars_pattern, '', name)
 
     cleaned_name = cleaned_name.strip(' .')
@@ -1599,12 +1600,11 @@ class PostProcessorWorker:
 
             should_create_post_subfolder = self.use_post_subfolders
 
-            if (not self.use_post_subfolders and self.use_subfolders and 
+            if (not self.use_post_subfolders and 
                 self.sfp_threshold is not None and num_potential_files_in_post >= self.sfp_threshold):
                 
                 self.logger(f"   ℹ️ Post has {num_potential_files_in_post} files (≥{self.sfp_threshold}). Activating Subfolder per Post via [sfp] command.")
                 should_create_post_subfolder = True
-
             base_folder_names_for_post_content = []
             determined_post_save_path_for_history = self.override_output_dir if self.override_output_dir else self.download_root
             if not self.extract_links_only and self.use_subfolders:
@@ -2462,6 +2462,7 @@ class DownloadThread(QThread):
                 proxies=self.proxies 
             )
 
+            processed_count_for_delay = 0
             for posts_batch_data in post_generator:
                 if self.isInterruptionRequested():
                     was_process_cancelled = True
@@ -2472,7 +2473,11 @@ class DownloadThread(QThread):
                         was_process_cancelled = True
                         break
 
-                    # --- FIX: Ensure 'proxies' is in this dictionary ---
+                    processed_count_for_delay += 1
+                    if processed_count_for_delay > 0 and processed_count_for_delay % 50 == 0:
+                         self.logger("   ⏳ Safety Pause: Waiting 10 seconds to respect server rate limits...")
+                         time.sleep(10)
+
                     worker_args = {
                         'post_data': individual_post_data,
                         'emitter': worker_signals_obj,

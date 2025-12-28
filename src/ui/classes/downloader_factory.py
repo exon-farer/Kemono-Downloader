@@ -25,6 +25,7 @@ from .saint2_downloader_thread import Saint2DownloadThread
 from .simp_city_downloader_thread import SimpCityDownloadThread
 from .toonily_downloader_thread import ToonilyDownloadThread
 from .deviantart_downloader_thread import DeviantArtDownloadThread
+from .hentaifox_downloader_thread import HentaiFoxDownloadThread
 
 def create_downloader_thread(main_app, api_url, service, id1, id2, effective_output_dir_for_run):
     """
@@ -185,6 +186,17 @@ def create_downloader_thread(main_app, api_url, service, id1, id2, effective_out
             cancellation_event=main_app.cancellation_event,
             parent=main_app
         )
+
+    # Handler for HentaiFox (New)
+    if 'hentaifox.com' in api_url or service == 'hentaifox':
+        main_app.log_signal.emit("🦊 HentaiFox URL detected.")
+        return HentaiFoxDownloadThread(
+            url_or_id=api_url,
+            output_dir=effective_output_dir_for_run,
+            parent=main_app
+        )    
+    
+    
     # ----------------------
     # --- Fallback ---
     # If no specific handler matched based on service name or URL pattern, return None.
