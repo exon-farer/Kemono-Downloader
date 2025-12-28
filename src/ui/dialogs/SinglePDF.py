@@ -126,7 +126,7 @@ def create_individual_pdf(post_data, output_filename, font_path, add_info_page=F
     font_family = _setup_pdf_fonts(pdf, font_path, logger)
     
     if add_info_page:
-f
+
         add_metadata_page(pdf, post_data, font_family)
 
     else:

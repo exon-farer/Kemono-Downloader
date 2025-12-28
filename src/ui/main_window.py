@@ -6636,7 +6636,7 @@ class DownloaderApp (QWidget ):
                     # Look up the name in the cache, falling back to the ID if not found.
                     creator_name = self.creator_name_cache.get((service, user_id), user_id) 
                     
-                  .
+                  
                     format_values = { 
                         'id': str(job_details.get('original_post_id_for_log', '')), 
                         'user': user_id, 
