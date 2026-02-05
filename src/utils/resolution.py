@@ -262,7 +262,17 @@ def setup_ui(main_app):
     main_app.use_subfolders_checkbox.setChecked(False)
     main_app.use_subfolders_checkbox.toggled.connect(main_app.update_ui_for_subfolders)
     main_app.advanced_row1_layout.addWidget(main_app.use_subfolders_checkbox)
+
+    main_app.revisions_checkbox = QCheckBox("Download Revisions")
+    main_app.revisions_checkbox.setToolTip("Fetch post revisions history (Kemono.cr / Coomer.st only)")
     
+    # Safely load the setting directly (defaults to False if key doesn't exist yet)
+    # This prevents crashes until we update main_window.py to handle the setting variable
+    initial_rev_state = main_app.settings.value("download_revisions", False, type=bool)
+    main_app.revisions_checkbox.setChecked(initial_rev_state)
+    
+    main_app.advanced_row1_layout.addWidget(main_app.revisions_checkbox)
+
     # --- Original Cookie Controls (for non-SimpCity sites) ---
     main_app.use_cookie_checkbox = QCheckBox("Use Cookie")
     main_app.use_cookie_checkbox.setChecked(main_app.use_cookie_setting)

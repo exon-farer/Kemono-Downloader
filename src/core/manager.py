@@ -267,6 +267,7 @@ class DownloadManager:
             'manga_custom_date_format': config.get('manga_custom_date_format', "YYYY-MM-DD"),
             'use_multithreading': config.get('use_multithreading', True),
             'proxies': proxies, # <--- NEW: Pass proxies to worker
+            'download_revisions': config.get('download_revisions', False) # <--- ADDED: Fixes the missing key error
         }
         
     def _setup_creator_profile(self, config):

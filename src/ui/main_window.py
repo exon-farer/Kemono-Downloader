@@ -350,7 +350,7 @@ class DownloaderApp (QWidget ):
         self.download_location_label_widget = None
         self.remove_from_filename_label_widget = None
         self.skip_words_label_widget = None
-        self.setWindowTitle("Kemono Downloader v7.9.1")
+        self.setWindowTitle("Kemono Downloader v8.0.0")
         setup_ui(self)
         self._connect_signals()
         if hasattr(self, 'character_input'):
@@ -800,7 +800,8 @@ class DownloaderApp (QWidget ):
             'manga_mode_checkbox': 'manga_mode_active',
             'scan_content_images_checkbox': 'scan_content_for_images',
             'use_cookie_checkbox': 'use_cookie',
-            'favorite_mode_checkbox': 'favorite_mode_active'
+            'favorite_mode_checkbox': 'favorite_mode_active',
+            'revisions_checkbox': 'download_revisions'
         }
 
     def _get_current_ui_settings_as_dict(self, api_url_override=None, output_dir_override=None):
@@ -4773,7 +4774,8 @@ class DownloaderApp (QWidget ):
             'sfp_threshold': download_commands.get('sfp_threshold'),
             'handle_unknown_mode': handle_unknown_command,
             'add_info_in_pdf': self.add_info_in_pdf_setting,     
-            'proxies': current_proxies        
+            'proxies': current_proxies,  
+            'download_revisions': self.revisions_checkbox.isChecked() if hasattr(self, 'revisions_checkbox') else False                  
         }
 
         args_template['override_output_dir'] = override_output_dir
@@ -4835,7 +4837,7 @@ class DownloaderApp (QWidget ):
                     'keep_duplicates_limit', 'downloaded_hash_counts', 'downloaded_hash_counts_lock',
                     'processed_post_ids', 'domain_override',
                     'archive_only_mode', 'skip_file_size_mb', 
-                    'manga_custom_filename_format','manga_custom_date_format', 'sfp_threshold', 'creator_name_cache'
+                    'manga_custom_filename_format','manga_custom_date_format', 'sfp_threshold', 'download_revisions', 'creator_name_cache'
 
                 ]
                 args_template['skip_current_file_flag'] = None
@@ -5233,7 +5235,8 @@ class DownloaderApp (QWidget ):
             'cookie_text': self.cookie_text_input.text(),
             'selected_cookie_file': self.selected_cookie_filepath,
             'add_info_in_pdf': self.add_info_in_pdf_setting,       
-            'proxies': current_proxies,     
+            'proxies': current_proxies,    
+            'download_revisions': self.revisions_checkbox.isChecked() if hasattr(self, 'revisions_checkbox') else False             
         }
 
         # 2. Define DEFAULTS for all settings that *should* be in the profile.
@@ -6516,8 +6519,8 @@ class DownloaderApp (QWidget ):
         'cookie_text': self.cookie_text_input.text(),
         'selected_cookie_file': self.selected_cookie_filepath,
         'app_base_dir': self.app_base_dir,
-
-        'manga_date_file_counter_ref':None ,
+        'manga_date_file_counter_ref':None,
+        'download_revisions': self.revisions_checkbox.isChecked() if hasattr(self, 'revisions_checkbox') else False
         }
 
         for job_details in self .files_for_current_retry_session :
@@ -7185,7 +7188,8 @@ class DownloaderApp (QWidget ):
             'archive_only_mode': download_commands.get('archive_only', False),
             'manga_custom_filename_format': self.custom_manga_filename_format,
             'manga_custom_date_format': self.manga_custom_date_format,
-            'handle_unknown_mode': download_commands.get('handle_unknown', False)
+            'handle_unknown_mode': download_commands.get('handle_unknown', False),
+            'download_revisions': self.revisions_checkbox.isChecked() if hasattr(self, 'revisions_checkbox') else False            
         }
 
         num_threads = int(self.thread_count_input.text()) if self.use_multithreading_checkbox.isChecked() else 1

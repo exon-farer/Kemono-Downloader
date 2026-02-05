@@ -40,7 +40,7 @@ try:
 except ImportError:
     Document = None
 from PyQt5 .QtCore import Qt ,QThread ,pyqtSignal ,QMutex ,QMutexLocker ,QObject ,QTimer ,QSettings ,QStandardPaths ,QCoreApplication ,QUrl ,QSize ,QProcess 
-from .api_client import download_from_api, fetch_post_comments, fetch_single_post_data
+from .api_client import download_from_api, fetch_post_comments, fetch_single_post_data, fetch_post_revisions
 from ..services.multipart_downloader import download_file_in_parts, MULTIPART_DOWNLOADER_AVAILABLE
 from ..services.drive_downloader import (
     download_mega_file, download_gdrive_file, download_dropbox_file
@@ -135,8 +135,8 @@ class PostProcessorWorker:
                  handle_unknown_mode=False,
                  creator_name_cache=None,
                  add_info_in_pdf=False,
-                 proxies=None
-
+                 proxies=None,
+                 download_revisions=False
                  ):
         self.post = post_data
         self.download_root = download_root
@@ -212,6 +212,7 @@ class PostProcessorWorker:
         self.creator_name_cache = creator_name_cache 
         self.add_info_in_pdf = add_info_in_pdf
         self.proxies = proxies
+        self.download_revisions = download_revisions
 
 
         if self.compress_images and Image is None:
@@ -1111,10 +1112,6 @@ class PostProcessorWorker:
                     post_title = self.post.get('title', '') or 'untitled_post'
                     post_main_file_info = self.post.get('file')
                     post_attachments = self.post.get('attachments', [])
-                    post_content_html = self.post.get('content', '')
-                    post_data = self.post
-                else:
-                    self.logger(f"   ⚠️ Failed to fetch full content for post {post_id}. Content-dependent features may not work for this post.")
 
             total_downloaded_this_post = 0
             total_skipped_this_post = 0
@@ -1223,7 +1220,54 @@ class PostProcessorWorker:
 
             if not self.extract_links_only:
                 self.logger(f"\n--- Processing {log_prefix} {post_id} ('{post_title[:50]}...') (Thread: {threading.current_thread().name}) ---")
-            
+
+            if self.download_revisions and self.service not in ['discord']:
+                self.logger(f"   Checking revisions for post {post_id}...")
+                
+                # 1. Prepare headers with Referer (Fixes 403/404 errors)
+                parsed_url = urlparse(self.api_url_input)
+                api_domain = parsed_url.netloc
+                rev_headers = {
+                    'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+                    'Referer': f'https://{api_domain}/',
+                    'Accept': 'text/css'
+                }
+                
+                rev_cookies = None
+                if self.use_cookie:
+                    rev_cookies = prepare_cookies_for_request(self.use_cookie, self.cookie_text, self.selected_cookie_file, self.app_base_dir, self.logger, target_domain=api_domain)
+
+                # 2. Fetch Revisions
+                revisions = fetch_post_revisions(api_domain, self.service, self.user_id, post_id, rev_headers, self.logger, cookies_dict=rev_cookies, proxies=self.proxies)
+                
+                if revisions:
+                    existing_paths = set()
+                    if post_main_file_info and 'path' in post_main_file_info:
+                        existing_paths.add(post_main_file_info['path'])
+                    for att in post_attachments:
+                        if 'path' in att:
+                            existing_paths.add(att['path'])
+                    
+                    found_rev_files = 0
+                    for rev in revisions:
+                        if 'file' in rev and rev['file'] and 'path' in rev['file']:
+                            f_path = rev['file']['path']
+                            if f_path not in existing_paths:
+                                post_attachments.append(rev['file'])
+                                existing_paths.add(f_path)
+                                found_rev_files += 1
+                        
+                        if 'attachments' in rev and rev['attachments']:
+                            for att in rev['attachments']:
+                                if 'path' in att:
+                                    if att['path'] not in existing_paths:
+                                        post_attachments.append(att)
+                                        existing_paths.add(att['path'])
+                                        found_rev_files += 1
+                    
+                    if found_rev_files > 0:
+                        self.logger(f"   Found {found_rev_files} recovered file(s) from history.")
+
             num_potential_files_in_post = len(post_attachments or []) + (1 if post_main_file_info and post_main_file_info.get('path') else 0)
 
             post_is_candidate_by_title_char_match = False
@@ -1740,9 +1784,10 @@ class PostProcessorWorker:
                     potential_post_subfolder_path = os.path.join(base_path_for_post_subfolder, name_candidate)
                     id_file_path = os.path.join(potential_post_subfolder_path, f".postid_{post_id_for_folder}")
 
-                    if not os.path.isdir(potential_post_subfolder_path):
+                    if not os.path.exists(potential_post_subfolder_path):
                         try:
-                            os.makedirs(potential_post_subfolder_path)
+                            # [FIX] Added exist_ok=True to prevent race condition crashes
+                            os.makedirs(potential_post_subfolder_path, exist_ok=True)
                             with open(id_file_path, 'w') as f:
                                 f.write(post_id_for_folder)
                             
@@ -1752,8 +1797,9 @@ class PostProcessorWorker:
                                 self.logger(f"   Post subfolder name conflict: Using '{final_post_subfolder_name}' to avoid mixing posts.")
                         except OSError as e_mkdir:
                             self.logger(f"   ❌ Error creating directory '{potential_post_subfolder_path}': {e_mkdir}.")
-                            final_post_subfolder_name = original_cleaned_post_title_for_sub
-                            break
+                            # [FIX] Don't break immediately; try the next increment instead
+                            suffix_counter += 1
+                            continue                
                     else:
                         if os.path.exists(id_file_path):
                             self.logger(f"   ℹ️ Re-using existing post subfolder: '{name_candidate}'")
@@ -2330,7 +2376,8 @@ class DownloadThread(QThread):
                  manga_custom_date_format="YYYY-MM-DD" ,
                  sfp_threshold=None,
                  creator_name_cache=None,
-                 proxies=None 
+                 proxies=None,
+                 download_revisions=False 
                  ): 
 
         super().__init__()
@@ -2408,6 +2455,7 @@ class DownloadThread(QThread):
         self.sfp_threshold = sfp_threshold 
         self.creator_name_cache = creator_name_cache 
         self.proxies = proxies
+        self.download_revisions = download_revisions
 
         if self.compress_images and Image is None:
             self.logger("⚠️ Image compression disabled: Pillow library not found (DownloadThread).")
@@ -2545,7 +2593,8 @@ class DownloadThread(QThread):
                         'manga_custom_filename_format': self.manga_custom_filename_format,
                         'manga_custom_date_format': self.manga_custom_date_format,
                         'sfp_threshold': self.sfp_threshold,
-                        'proxies': self.proxies 
+                        'proxies': self.proxies,
+                        'download_revisions': self.download_revisions 
                     }
 
                     post_processing_worker = PostProcessorWorker(**worker_args)

@@ -185,6 +185,27 @@ def fetch_post_comments(api_domain, service, user_id, post_id, headers, logger, 
     except ValueError as e:
         raise RuntimeError(f"Error decoding JSON from comments API for post {post_id}: {e}")
 
+def fetch_post_revisions(api_domain, service, user_id, post_id, headers, logger, cookies_dict=None, proxies=None):
+    """
+    Fetches the revision history for a specific post.
+    Endpoint: /v1/{service}/user/{creator_id}/post/{post_id}/revisions
+    """
+    url = f"https://{api_domain}/api/v1/{service}/user/{user_id}/post/{post_id}/revisions"
+
+    try:
+        request_timeout = (10, 30)
+        response = requests.get(url, headers=headers, timeout=request_timeout, cookies=cookies_dict, proxies=proxies, verify=False)
+        
+        # [FIX] If 404, just return empty list silently. It's not an error.
+        if response.status_code == 404:
+            return []
+            
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger(f"   ⚠️ Failed to fetch revisions for post {post_id}: {e}")
+        return []
+
 def download_from_api(
     api_url_input,
     logger=print,
@@ -200,7 +221,8 @@ def download_from_api(
     manga_filename_style_for_sort_check=None,
     processed_post_ids=None,
     fetch_all_first=False,
-    proxies=None
+    proxies=None,
+    **kwargs
     ):
     parsed_input_url_for_domain = urlparse(api_url_input)
     api_domain = parsed_input_url_for_domain.netloc
@@ -229,6 +251,8 @@ def download_from_api(
     cookies_for_api = None
     if use_cookie and app_base_dir:
         cookies_for_api = prepare_cookies_for_request(use_cookie, cookie_text, selected_cookie_file, app_base_dir, logger, target_domain=api_domain)
+  
+
     if target_post_id:
         if target_post_id in processed_post_ids:
             logger(f"   Skipping already processed target post ID: {target_post_id}")
@@ -247,16 +271,48 @@ def download_from_api(
                 direct_post_data = direct_post_data[0]
             if isinstance(direct_post_data, dict) and 'post' in direct_post_data and isinstance(direct_post_data['post'], dict):
                 direct_post_data = direct_post_data['post']
+
+            # --- ADDED REVISION LOGIC FOR DIRECT LINKS ---
             if isinstance(direct_post_data, dict) and direct_post_data.get('id') == target_post_id:
+                # Check for revisions if requested
+                if kwargs.get('download_revisions') and service != 'discord':
+                    logger(f"   Checking historical revisions for direct post {target_post_id}...")
+                    revisions = fetch_post_revisions(api_domain, service, user_id, target_post_id, headers, logger, cookies_dict=cookies_for_api, proxies=proxies)
+                    
+                    if revisions:
+                        # Map existing paths to avoid duplicates
+                        existing_paths = set()
+                        if direct_post_data.get('file') and 'path' in direct_post_data['file']:
+                            existing_paths.add(direct_post_data['file']['path'])
+                        
+                        attachments = direct_post_data.setdefault('attachments', [])
+                        for att in attachments:
+                            if 'path' in att: existing_paths.add(att['path'])
+                        
+                        found_rev_files = 0
+                        for rev in revisions:
+                            # Check main file in revision
+                            if rev.get('file') and rev['file'].get('path'):
+                                if rev['file']['path'] not in existing_paths:
+                                    attachments.append(rev['file'])
+                                    existing_paths.add(rev['file']['path'])
+                                    found_rev_files += 1
+                            # Check attachments in revision
+                            for att in rev.get('attachments', []):
+                                if att.get('path') and att['path'] not in existing_paths:
+                                    attachments.append(att)
+                                    existing_paths.add(att['path'])
+                                    found_rev_files += 1
+                        
+                        if found_rev_files > 0:
+                            logger(f"   ✅ Recovered {found_rev_files} file(s) from post history.")
+
                 logger(f"   ✅ Direct fetch successful for post {target_post_id}.")
                 yield [direct_post_data]
                 return
-            else:
-                response_type = type(direct_post_data).__name__
-                response_snippet = str(direct_post_data)[:200]
-                logger(f"   ⚠️ Direct fetch for post {target_post_id} returned unexpected data (Type: {response_type}, Snippet: '{response_snippet}'). Falling back to pagination.")
-        except requests.exceptions.RequestException as e:
-            logger(f"   ⚠️ Direct fetch failed for post {target_post_id}: {e}. Falling back to pagination.")
+            # --- END REVISION LOGIC ---
+
+      
         except Exception as e:
             logger(f"   ⚠️ Unexpected error during direct fetch for post {target_post_id}: {e}. Falling back to pagination.")
     if not service or not user_id:
