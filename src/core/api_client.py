@@ -15,6 +15,8 @@ from ..config.constants import (
     STYLE_POST_TITLE_GLOBAL_NUMBERING
 )
 
+_last_429_warning_time = 0
+
 class CustomSSLAdapter(HTTPAdapter):
     """
     A custom HTTPAdapter that forces check_hostname=False when using SSL.
@@ -131,10 +133,19 @@ def fetch_single_post_data(api_domain, service, user_id, post_id, headers, logge
         
             
             if response.status_code == 429:
-                wait_time = 20 + (attempt * 10) # 20s, 30s, 40s...
-                logger(f"      ⚠️ Rate Limited (429) on post {post_id}. Waiting {wait_time} seconds before retrying...")
+                wait_time = 20 + (attempt * 10)
+                
+                # [FIX] properly reference the global variable
+                global _last_429_warning_time 
+                current_time = time.time()
+                
+                # Only log if it's been more than 60 seconds since the last warning
+                if current_time - _last_429_warning_time > 60:
+                    logger(f"      ⚠️ Rate Limited (429). API is throttling requests. Pausing {wait_time}s (will continue automatically)...")
+                    _last_429_warning_time = current_time
+                
                 time.sleep(wait_time)
-                continue # Try loop again
+                continue
            
 
             response.raise_for_status()

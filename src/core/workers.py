@@ -1112,6 +1112,7 @@ class PostProcessorWorker:
                     post_title = self.post.get('title', '') or 'untitled_post'
                     post_main_file_info = self.post.get('file')
                     post_attachments = self.post.get('attachments', [])
+                    post_content_html = self.post.get('content', '')                    
 
             total_downloaded_this_post = 0
             total_skipped_this_post = 0
