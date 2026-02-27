@@ -2882,11 +2882,16 @@ class DownloaderApp (QWidget ):
         # Create a new temporary queue containing only the links that match the search term
         filtered_link_queue = deque()
         for post_title ,link_text ,link_url ,platform ,decryption_key in self .extracted_links_cache :
+            
+            # --- FIXED LOGIC: Added post_title to the search condition ---
             matches_search =(not search_term or
+            (post_title and search_term in post_title.lower()) or
             search_term in link_text .lower ()or
             search_term in link_url .lower ()or
             search_term in platform .lower ()or
             (decryption_key and search_term in decryption_key .lower ()))
+            # -------------------------------------------------------------
+            
             if matches_search :
                 filtered_link_queue.append((post_title, link_text, link_url, platform, decryption_key))
 
@@ -2898,7 +2903,7 @@ class DownloaderApp (QWidget ):
             self._try_process_next_external_link()
 
         if self .main_log_output :self .main_log_output .verticalScrollBar ().setValue (self .main_log_output .verticalScrollBar ().maximum ())
-
+        
     def _display_and_schedule_next (self ,link_data ):
         post_title ,link_text ,link_url ,platform ,decryption_key =link_data
         is_only_links_mode =self .radio_only_links and self .radio_only_links .isChecked ()

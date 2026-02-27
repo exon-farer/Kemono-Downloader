@@ -2,7 +2,7 @@ from collections import defaultdict
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
-    QMessageBox, QPushButton, QVBoxLayout, QAbstractItemView
+    QMessageBox, QPushButton, QVBoxLayout, QAbstractItemView, QLineEdit
 )
 from ...i18n.translator import get_translation
 from ..main_window import get_app_icon_object
@@ -46,7 +46,9 @@ class DownloadExtractedLinksDialog(QDialog):
         self.main_info_label.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         self.main_info_label.setWordWrap(True)
         layout.addWidget(self.main_info_label)
-
+        self.search_input = QLineEdit()
+        self.search_input.textChanged.connect(self._filter_links)
+        layout.addWidget(self.search_input)
         self.links_list_widget = QListWidget()
         self.links_list_widget.setSelectionMode(QAbstractItemView.NoSelection)
         self._populate_list()
@@ -107,6 +109,7 @@ class DownloadExtractedLinksDialog(QDialog):
         """Sets the text for all translatable UI elements."""
         self.setWindowTitle(self._tr("download_external_links_dialog_title", "Download Selected External Links"))
         self.main_info_label.setText(self._tr("download_external_links_dialog_main_label", "Found {count} supported link(s)...").format(count=len(self.links_data)))
+        self.search_input.setPlaceholderText(self._tr("search_links_placeholder", "Search by post title, URL, platform, or text..."))       
         self.select_all_button.setText(self._tr("select_all_button_text", "Select All"))
         self.deselect_all_button.setText(self._tr("deselect_all_button_text", "Deselect All"))
         self.download_button.setText(self._tr("download_selected_button_text", "Download Selected"))
@@ -128,10 +131,10 @@ class DownloadExtractedLinksDialog(QDialog):
                 item.setForeground(header_color)
 
     def _set_all_items_checked(self, check_state):
-        """Sets the checked state for all checkable items in the list."""
+        """Sets the checked state for all visible checkable items in the list."""
         for i in range(self.links_list_widget.count()):
             item = self.links_list_widget.item(i)
-            if item.flags() & Qt.ItemIsUserCheckable:
+            if (item.flags() & Qt.ItemIsUserCheckable) and not item.isHidden():
                 item.setCheckState(check_state)
 
     def _handle_download_selected(self):
@@ -151,3 +154,50 @@ class DownloadExtractedLinksDialog(QDialog):
                 self._tr("no_selection_title", "No Selection"),
                 self._tr("no_selection_message_links", "Please select at least one link to download.")
             )
+
+    def _filter_links(self, search_term):
+        """Filters the links in the dialog based on the search term."""
+        search_term = search_term.lower().strip()
+        
+        current_header = None
+        visible_children_count = 0
+        
+        for i in range(self.links_list_widget.count()):
+            item = self.links_list_widget.item(i)
+            
+            # Check if the item is a Header (headers don't have the UserCheckable flag)
+            if not (item.flags() & Qt.ItemIsUserCheckable):
+                # Evaluate the previous header before starting a new one
+                if current_header is not None:
+                    current_header.setHidden(visible_children_count == 0)
+                    
+                current_header = item
+                visible_children_count = 0
+            else:
+                # It's a link item, extract the data dictionary
+                link_data = item.data(Qt.UserRole)
+                if not link_data:
+                    continue
+                    
+                post_title = str(link_data.get('title', '')).lower()
+                link_text = str(link_data.get('link_text', '')).lower()
+                link_url = str(link_data.get('url', '')).lower()
+                platform = str(link_data.get('platform', '')).lower()
+                decryption_key = str(link_data.get('decryption_key', link_data.get('key', ''))).lower()
+                
+                matches_search = (
+                    not search_term or
+                    search_term in post_title or
+                    search_term in link_text or
+                    search_term in link_url or
+                    search_term in platform or
+                    search_term in decryption_key
+                )
+                
+                item.setHidden(not matches_search)
+                if matches_search:
+                    visible_children_count += 1
+                    
+        # Don't forget to evaluate the very last header in the list!
+        if current_header is not None:
+            current_header.setHidden(visible_children_count == 0)
