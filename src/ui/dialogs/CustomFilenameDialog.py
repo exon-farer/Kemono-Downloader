@@ -15,7 +15,8 @@ class CustomFilenameDialog(QDialog):
         "added": "added",
         "published": "published",
         "edited": "edited",
-        "name": "name"
+        "name": "name",
+        "Description": "content"  
     }
 
     # STRICT LIST: Only these three will be clickable for DeviantArt

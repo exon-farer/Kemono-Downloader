@@ -465,6 +465,10 @@ class PostProcessorWorker:
                         published_date = self.post.get('published')
                         edited_date = self.post.get('edited')
 
+                        # Clean and truncate the description to prevent "Path too long" OS exceptions
+                        raw_content = str(self.post.get('content') or '')
+                        clean_content = robust_clean_name(strip_html_tags(raw_content)).strip()[:60] 
+
                         format_values = {
                             'id': str(self.post.get('id', '')),
                             'user': user_id,
@@ -474,7 +478,8 @@ class PostProcessorWorker:
                             'name': original_filename_cleaned_base,
                             'added': format_date(added_date or published_date),
                             'published': format_date(published_date),
-                            'edited': format_date(edited_date or published_date)
+                            'edited': format_date(edited_date or published_date),
+                            'content': clean_content  # <-- Pass the sanitized description
                         }
                         
                         custom_base_name = self.manga_custom_filename_format.format(**format_values)
@@ -1088,10 +1093,10 @@ class PostProcessorWorker:
                 log_prefix = "Post"
 
             content_is_needed = (
-                self.show_external_links or
-                self.extract_links_only or
-                self.scan_content_for_images or
-                (self.filter_mode == 'text_only' and self.text_only_scope == 'content')
+                self.show_external_links or self.extract_links_only or self.scan_content_for_images or
+                (self.filter_mode == 'text_only' and self.text_only_scope == 'content') or
+                # Add the following line to fetch post data if the custom format requires the description
+                (self.manga_mode_active and self.manga_filename_style == STYLE_CUSTOM and '{content}' in self.manga_custom_filename_format)
             )
 
             if content_is_needed and self.post.get('content') is None and self.service != 'discord':

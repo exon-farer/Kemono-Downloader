@@ -1018,7 +1018,7 @@ class EmptyPopupDialog (QDialog ):
         service_lower =service_name .lower ()
         if service_lower in ['onlyfans','fansly']:
             return "coomer.su"
-        return "kemono.su"
+        return "kemono.cr"
 
     def _handle_add_selected (self ):
         """Gathers globally selected creators and processes them."""

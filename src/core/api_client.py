@@ -256,8 +256,8 @@ def download_from_api(
         return
     
     if not any(d in api_domain.lower() for d in ['kemono.su', 'kemono.party', 'kemono.cr', 'coomer.su', 'coomer.party', 'coomer.st']):
-        logger(f"⚠️ Unrecognized domain '{api_domain}' from input URL. Defaulting to kemono.su for API calls.")
-        api_domain = "kemono.su"
+        logger(f"⚠️ Unrecognized domain '{api_domain}' from input URL. Defaulting to kemono.cr for API calls.")
+        api_domain = "kemono.cr"
         
     cookies_for_api = None
     if use_cookie and app_base_dir:
