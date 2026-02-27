@@ -350,7 +350,7 @@ class DownloaderApp (QWidget ):
         self.download_location_label_widget = None
         self.remove_from_filename_label_widget = None
         self.skip_words_label_widget = None
-        self.setWindowTitle("Kemono Downloader v8.0.0")
+        self.setWindowTitle("Kemono Downloader v8.0.1")
         setup_ui(self)
         self._connect_signals()
         if hasattr(self, 'character_input'):
@@ -4656,6 +4656,9 @@ class DownloaderApp (QWidget ):
             }
             style_text = style_display_names.get(self.manga_filename_style, "Unknown")
             log_messages.append(f"      ↳ Filename Style: {style_text}")
+
+            if self.manga_filename_style == STYLE_CUSTOM and '{content}' in self.custom_manga_filename_format:
+                log_messages.append(f"      ↳ ⚠️ WARNING: Custom renaming uses {{Description}}. Fetching post content requires an extra API request per post, significantly slowing down the download.")
 
             if actual_filters_to_use_for_run:
                 log_messages.append(f"      ↳ Character Filter (for naming/folder): {', '.join(item['name'] for item in actual_filters_to_use_for_run)}")

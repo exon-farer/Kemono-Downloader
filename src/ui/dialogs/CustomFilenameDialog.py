@@ -72,8 +72,10 @@ class CustomFilenameDialog(QDialog):
         
         for display_key, internal_key in self.DISPLAY_KEY_MAP.items():
             key_button = QPushButton(f"{{{display_key}}}")
-            
-# --- DeviantArt Logic ---
+
+            if display_key == "Description":
+                key_button.setToolTip("⚠️ Warning: Using this requires an extra API request per post, significantly slowing down downloads.")
+
             if is_deviantart:
                 if internal_key in self.DA_ALLOWED_KEYS:
                     # Active buttons: Bold text, enabled
