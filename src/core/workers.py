@@ -12,12 +12,13 @@ import json
 from collections import deque, defaultdict
 from datetime import datetime 
 import hashlib
+from .visual_sorter import VisualSorter
 from concurrent.futures import ThreadPoolExecutor, as_completed, CancelledError, Future
 from io import BytesIO
 from urllib .parse import urlparse 
 import requests
 import cloudscraper 
-
+import shutil
 try:
     from PIL import Image
 except ImportError:
@@ -136,7 +137,9 @@ class PostProcessorWorker:
                  creator_name_cache=None,
                  add_info_in_pdf=False,
                  proxies=None,
-                 download_revisions=False
+                 download_revisions=False,
+                 visual_sort_active=False, 
+                 user_data_path=None
                  ):
         self.post = post_data
         self.download_root = download_root
@@ -213,6 +216,8 @@ class PostProcessorWorker:
         self.add_info_in_pdf = add_info_in_pdf
         self.proxies = proxies
         self.download_revisions = download_revisions
+        self.visual_sort_active = visual_sort_active 
+        self.user_data_path = user_data_path
 
 
         if self.compress_images and Image is None:
@@ -337,23 +342,21 @@ class PostProcessorWorker:
             cookies_to_use_for_file = prepare_cookies_for_request(self.use_cookie, self.cookie_text, self.selected_cookie_file, self.app_base_dir, self.logger)
         
         if self.skip_file_size_mb is not None:
-                api_original_filename_for_size_check = file_info.get('_original_name_for_log', file_info.get('name'))
-                try:
-                        # Use a stream=True HEAD request to get headers without downloading the body
-                        with requests.head(file_url, headers=file_download_headers, timeout=15, cookies=cookies_to_use_for_file, allow_redirects=True, proxies=self.proxies, verify=False) as head_response:
-                               
-                                head_response.raise_for_status()
-                                content_length = head_response.headers.get('Content-Length')
-                                if content_length:
-                                        file_size_bytes = int(content_length)
-                                        file_size_mb = file_size_bytes / (1024 * 1024)
-                                        if file_size_mb < self.skip_file_size_mb:
-                                                self.logger(f"   -> Skip File (Size): '{api_original_filename_for_size_check}' is {file_size_mb:.2f} MB, which is smaller than the {self.skip_file_size_mb} MB limit.")
-                                                return 0, 1, api_original_filename_for_size_check, False, FILE_DOWNLOAD_STATUS_SKIPPED, None
-                                else:
-                                        self.logger(f"   ⚠️ Could not determine file size for '{api_original_filename_for_size_check}' to check against size limit. Proceeding with download.")
-                except requests.RequestException as e:
-                        self.logger(f"   ⚠️ Could not fetch file headers to check size for '{api_original_filename_for_size_check}': {e}. Proceeding with download.")
+            api_original_filename_for_size_check = file_info.get('_original_name_for_log', file_info.get('name'))
+            try:
+                with requests.head(file_url, headers=file_download_headers, timeout=15, cookies=cookies_to_use_for_file, allow_redirects=True, proxies=self.proxies, verify=False) as head_response:
+                    head_response.raise_for_status()
+                    content_length = head_response.headers.get('Content-Length')
+                    if content_length:
+                        file_size_bytes = int(content_length)
+                        file_size_mb = file_size_bytes / (1024 * 1024)
+                        if file_size_mb < self.skip_file_size_mb:
+                            self.logger(f"   -> Skip File (Size): '{api_original_filename_for_size_check}' is {file_size_mb:.2f} MB, which is smaller than the {self.skip_file_size_mb} MB limit.")
+                            return 0, 1, api_original_filename_for_size_check, False, FILE_DOWNLOAD_STATUS_SKIPPED, None
+                    else:
+                        self.logger(f"   ⚠️ Could not determine file size for '{api_original_filename_for_size_check}' to check against size limit. Proceeding with download.")
+            except requests.RequestException as e:
+                self.logger(f"   ⚠️ Could not fetch file headers to check size for '{api_original_filename_for_size_check}': {e}. Proceeding with download.")
                 
         api_original_filename = file_info.get('_original_name_for_log', file_info.get('name'))
         filename_to_save_in_main_path = ""
@@ -456,8 +459,7 @@ class PostProcessorWorker:
                         service = self.service.lower()
                         user_id = str(self.user_id)
                         
-                        # Look up the name in the cache, falling back to the user_id if not found
-                        creator_name = user_id # Default to the ID
+                        creator_name = user_id 
                         if self.creator_name_cache:
                             creator_name = self.creator_name_cache.get((service, user_id), user_id)
 
@@ -465,7 +467,6 @@ class PostProcessorWorker:
                         published_date = self.post.get('published')
                         edited_date = self.post.get('edited')
 
-                        # Clean and truncate the description to prevent "Path too long" OS exceptions
                         raw_content = str(self.post.get('content') or '')
                         clean_content = robust_clean_name(strip_html_tags(raw_content)).strip()[:60] 
 
@@ -479,7 +480,7 @@ class PostProcessorWorker:
                             'added': format_date(added_date or published_date),
                             'published': format_date(published_date),
                             'edited': format_date(edited_date or published_date),
-                            'content': clean_content  # <-- Pass the sanitized description
+                            'content': clean_content 
                         }
                         
                         custom_base_name = self.manga_custom_filename_format.format(**format_values)
@@ -493,7 +494,6 @@ class PostProcessorWorker:
                     except (KeyError, IndexError, ValueError) as e:
                         self.logger(f"⚠️ Custom format error: {e}. Falling back to original filename.")
                         filename_to_save_in_main_path = cleaned_original_api_filename
-            
             
                 elif self.manga_filename_style == STYLE_DATE_POST_TITLE:
                     published_date_str = self.post.get('published')
@@ -580,17 +580,13 @@ class PostProcessorWorker:
 
 
         MAX_PATH_LENGTH = 240  
-        
         base_name, extension = os.path.splitext(filename_to_save_in_main_path)
-        
         potential_full_path = os.path.join(target_folder_path, filename_to_save_in_main_path)
         
         if len(potential_full_path) > MAX_PATH_LENGTH:
             excess_length = len(potential_full_path) - MAX_PATH_LENGTH
-            
             if len(base_name) > excess_length:
                 truncated_base_name = base_name[:-excess_length]
-                
                 filename_to_save_in_main_path = truncated_base_name.strip() + extension
                 self.logger(f"   ⚠️ Path was too long. Truncating filename to: '{filename_to_save_in_main_path}'")
             else:
@@ -637,23 +633,17 @@ class PostProcessorWorker:
             if os.path.exists(final_save_path_check):
                 try:
                     self.logger(f"   ⚠️ File '{filename_to_save_in_main_path}' exists. Verifying content with URL hash...")
-                    
                     parsed_url = urlparse(file_url)
                     hash_from_url = os.path.basename(parsed_url.path).split('.')[0]
-                    
                     hash_from_disk = hashlib.sha256()
                     with open(final_save_path_check, 'rb') as f:
-                        for chunk in iter(lambda: f.read(8192), b""): # Use a larger buffer for hashing
+                        for chunk in iter(lambda: f.read(8192), b""):
                             hash_from_disk.update(chunk)
-                    
                     if hash_from_url == hash_from_disk.hexdigest():
                         self.logger(f"   -> Skip (Hash Match): The existing file is a perfect match.")
                         return 0, 1, filename_to_save_in_main_path, was_original_name_kept_flag, FILE_DOWNLOAD_STATUS_SKIPPED, None
                     else:
-                        # Hashes differ. This is a legitimate collision. Log it and proceed.
-                        # The downloader will then save the new file with a numbered suffix (_1, _2, etc.).
                         self.logger(f"   -> Hash Mismatch. Existing file is different content. Proceeding to download new file with a suffix.")
-
                 except Exception as e:
                     self.logger(f"   ⚠️ Could not perform hash check for existing file: {e}. Re-downloading with a suffix to be safe.")
         
@@ -675,11 +665,8 @@ class PostProcessorWorker:
                 if attempt_num_single_stream > 0:
                     self.logger(f"   Retrying download for '{api_original_filename}' (Overall Attempt {attempt_num_single_stream + 1}/{max_retries + 1})...")
                     time.sleep(retry_delay * (2 ** (attempt_num_single_stream - 1)))
-                
                 self._emit_signal('file_download_status', True)
-                
                 current_url_to_try = file_url
-                          
                 response = requests.get(current_url_to_try, headers=file_download_headers, timeout=(30, 300), stream=True, cookies=cookies_to_use_for_file, proxies=self.proxies, verify=False)
                 
                 if response.status_code == 403 and ('kemono.' in current_url_to_try or 'coomer.' in current_url_to_try):
@@ -688,35 +675,27 @@ class PostProcessorWorker:
                     if new_url != current_url_to_try:
                         self.logger(f"   Retrying with new URL: {new_url}")
                         file_url = new_url
-                        response.close() # Close the old response
+                        response.close()
                         response = requests.get(new_url, headers=file_download_headers, timeout=(30, 300), stream=True, cookies=cookies_to_use_for_file, proxies=self.proxies, verify=False)
                 response.raise_for_status()
-                
                 total_size_bytes = int(response.headers.get('Content-Length', 0))
 
-                if self.skip_file_size_mb is not None:
-                    if total_size_bytes > 0:
-                        file_size_mb = total_size_bytes / (1024 * 1024)
-                        if file_size_mb < self.skip_file_size_mb:
-                            self.logger(f"   -> Skip File (Size): '{api_original_filename}' is {file_size_mb:.2f} MB, which is smaller than the {self.skip_file_size_mb} MB limit.")
-                            return 0, 1, api_original_filename, False, FILE_DOWNLOAD_STATUS_SKIPPED, None
-
+                if self.skip_file_size_mb is not None and total_size_bytes > 0:
+                    file_size_mb = total_size_bytes / (1024 * 1024)
+                    if file_size_mb < self.skip_file_size_mb:
+                        self.logger(f"   -> Skip File (Size): '{api_original_filename}' is {file_size_mb:.2f} MB, which is smaller than the {self.skip_file_size_mb} MB limit.")
+                        return 0, 1, api_original_filename, False, FILE_DOWNLOAD_STATUS_SKIPPED, None
 
                 num_parts_for_file = min(self.multipart_parts_count, MAX_PARTS_FOR_MULTIPART_DOWNLOAD)
-           
                 file_is_eligible_by_scope = False
                 if self.multipart_scope == 'videos':
-                    if is_video(api_original_filename):
-                        file_is_eligible_by_scope = True
+                    if is_video(api_original_filename): file_is_eligible_by_scope = True
                 elif self.multipart_scope == 'archives':
-                    if is_archive(api_original_filename):
-                        file_is_eligible_by_scope = True
+                    if is_archive(api_original_filename): file_is_eligible_by_scope = True
                 elif self.multipart_scope == 'both':
-                    if is_video(api_original_filename) or is_archive(api_original_filename):
-                        file_is_eligible_by_scope = True
+                    if is_video(api_original_filename) or is_archive(api_original_filename): file_is_eligible_by_scope = True
 
                 min_size_in_bytes = self.multipart_min_size_mb * 1024 * 1024
-
                 attempt_multipart = (self.allow_multipart_download and MULTIPART_DOWNLOADER_AVAILABLE and
                                      file_is_eligible_by_scope and
                                      num_parts_for_file > 1 and total_size_bytes > min_size_in_bytes and 
@@ -725,7 +704,7 @@ class PostProcessorWorker:
                 if self._check_pause(f"Multipart decision for '{api_original_filename}'"): break
 
                 if attempt_multipart:
-                    response.close() # Close the initial connection before starting multipart
+                    response.close()
                     mp_save_path_for_unique_part_stem_arg = os.path.join(target_folder_path, f"{unique_part_file_stem_on_disk}{temp_file_ext_for_unique_part}")
                     mp_success, mp_bytes, mp_hash, mp_file_handle = download_file_in_parts(
                         file_url, mp_save_path_for_unique_part_stem_arg, total_size_bytes, num_parts_for_file, file_download_headers, api_original_filename,
@@ -769,16 +748,13 @@ class PostProcessorWorker:
                         attempt_is_complete = False
                         if response.status_code == 200:
                             if total_size_bytes > 0:
-                                if current_attempt_downloaded_bytes == total_size_bytes:
-                                    attempt_is_complete = True
-                                else:
-                                    self.logger(f"   ⚠️ Single-stream attempt for '{api_original_filename}' incomplete: received {current_attempt_downloaded_bytes} of {total_size_bytes} bytes.")
+                                if current_attempt_downloaded_bytes == total_size_bytes: attempt_is_complete = True
+                                else: self.logger(f"   ⚠️ Single-stream attempt for '{api_original_filename}' incomplete: received {current_attempt_downloaded_bytes} of {total_size_bytes} bytes.")
                             elif total_size_bytes == 0:
                                 if current_attempt_downloaded_bytes > 0:
                                     self.logger(f"   ⚠️ Mismatch for '{api_original_filename}': Server reported 0 bytes, but received {current_attempt_downloaded_bytes} bytes this attempt.")
                                     attempt_is_complete = True
-                                else:
-                                    attempt_is_complete = True
+                                else: attempt_is_complete = True
                         if attempt_is_complete:
                             calculated_file_hash = md5_hasher.hexdigest()
                             downloaded_size_bytes = current_attempt_downloaded_bytes
@@ -787,24 +763,18 @@ class PostProcessorWorker:
                             break
                         else:
                             if os.path.exists(current_single_stream_part_path):
-                                try:
-                                    os.remove(current_single_stream_part_path)
-                                except OSError as e_rem_part:
-                                    self.logger(f"   -> Failed to remove .part file after failed single stream attempt: {e_rem_part}")
+                                try: os.remove(current_single_stream_part_path)
+                                except OSError as e_rem_part: self.logger(f"   -> Failed to remove .part file after failed single stream attempt: {e_rem_part}")
                     except Exception as e_write:
                         self.logger(f"   ❌ Error writing single-stream to disk for '{api_original_filename}': {e_write}")
                         if os.path.exists(current_single_stream_part_path): os.remove(current_single_stream_part_path)
                         raise
-
             except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, http.client.IncompleteRead) as e:
                 self.logger(f"   ❌ Download Error (Retryable): {api_original_filename}. Error: {e}")
                 last_exception_for_retry_later = e
-                if isinstance(e, requests.exceptions.ConnectionError) and ("Failed to resolve" in str(e) or "NameResolutionError" in str(e)):
-                    self.logger("   💡 This looks like a DNS resolution problem. Please check your internet connection, DNS settings, or VPN.")
             except requests.exceptions.RequestException as e:
                 if e.response is not None and e.response.status_code == 403:
-                    self.logger(f"   ⚠️ Download Error (403 Forbidden): {api_original_filename}. This often requires valid cookies.")
-                    self.logger(f"      Will retry... Check your 'Use Cookie' settings if this persists.")
+                    self.logger(f"   ⚠️ Download Error (403 Forbidden): {api_original_filename}. Retrying...")
                     last_exception_for_retry_later = e
                 else:
                     self.logger(f"   ❌ Download Error (Non-Retryable): {api_original_filename}. Error: {e}")
@@ -817,15 +787,13 @@ class PostProcessorWorker:
                 is_permanent_error = True                
                 break
             finally:
-                if response:
-                    response.close()
+                if response: response.close()
                 self._emit_signal('file_download_status', False)
 
         final_total_for_progress = total_size_bytes if download_successful_flag and total_size_bytes > 0 else downloaded_size_bytes
         self._emit_signal('file_progress', api_original_filename, (downloaded_size_bytes, final_total_for_progress))
 
-        if (not download_successful_flag and
-                isinstance(last_exception_for_retry_later, http.client.IncompleteRead) and
+        if (not download_successful_flag and isinstance(last_exception_for_retry_later, http.client.IncompleteRead) and
                 total_size_bytes > 0 and downloaded_part_file_path and os.path.exists(downloaded_part_file_path)):
             try:
                 actual_size = os.path.getsize(downloaded_part_file_path)
@@ -834,47 +802,35 @@ class PostProcessorWorker:
                     download_successful_flag = True
                     md5_hasher = hashlib.md5()
                     with open(downloaded_part_file_path, 'rb') as f_verify:
-                        for chunk in iter(lambda: f_verify.read(8192), b""):
-                            md5_hasher.update(chunk)
+                        for chunk in iter(lambda: f_verify.read(8192), b""): md5_hasher.update(chunk)
                     calculated_file_hash = md5_hasher.hexdigest()
-            except Exception as rescue_exc:
-                self.logger(f"   ⚠️ Failed to rescue file despite matching size. Error: {rescue_exc}")
+            except Exception as rescue_exc: self.logger(f"   ⚠️ Failed to rescue file despite matching size. Error: {rescue_exc}")
 
         if self.check_cancel() or (skip_event and skip_event.is_set()) or (self.pause_event and self.pause_event.is_set() and not download_successful_flag):
             if downloaded_part_file_path and os.path.exists(downloaded_part_file_path):
-                try:
-                    os.remove(downloaded_part_file_path)
-                except OSError:
-                    pass
+                try: os.remove(downloaded_part_file_path)
+                except OSError: pass
             return 0, 1, filename_to_save_in_main_path, was_original_name_kept_flag, FILE_DOWNLOAD_STATUS_SKIPPED, None
 
         if download_successful_flag:
             if self._check_pause(f"Post-download processing for '{api_original_filename}'"):
                 if downloaded_part_file_path and os.path.exists(downloaded_part_file_path):
-                    try:
-                        os.remove(downloaded_part_file_path)
+                    try: os.remove(downloaded_part_file_path)
                     except OSError: pass
                 return 0, 1, filename_to_save_in_main_path, was_original_name_kept_flag, FILE_DOWNLOAD_STATUS_SKIPPED, None
             
-            if (self.compress_images and downloaded_part_file_path and
-                    is_image(api_original_filename) and
+            if (self.compress_images and downloaded_part_file_path and is_image(api_original_filename) and
                     os.path.getsize(downloaded_part_file_path) > 1.5 * 1024 * 1024):
-                
                 self.logger(f"   🔄 Compressing '{api_original_filename}' to WebP...")
                 try:
                     with Image.open(downloaded_part_file_path) as img:
-                        if img.mode not in ('RGB', 'RGBA'):
-                            img = img.convert('RGBA')
-                        
+                        if img.mode not in ('RGB', 'RGBA'): img = img.convert('RGBA')
                         output_buffer = BytesIO()
                         img.save(output_buffer, format='WebP', quality=85)
-                        
                         data_to_write_io = output_buffer
-                        
                         base, _ = os.path.splitext(filename_to_save_in_main_path)
                         filename_to_save_in_main_path = f"{base}.webp"
                         self.logger(f"   ✅ Compression successful. New size: {len(data_to_write_io.getvalue()) / (1024*1024):.2f} MB")
-
                 except Exception as e_compress:
                     self.logger(f"   ⚠️ Failed to compress '{api_original_filename}': {e_compress}. Saving original file instead.")
                     data_to_write_io = None
@@ -889,34 +845,85 @@ class PostProcessorWorker:
                 final_filename_on_disk = f"{base_name}_{counter}{extension}"
                 final_save_path = os.path.join(effective_save_folder, final_filename_on_disk)
                 counter += 1
-            
-            if counter > 1:
-                self.logger(f"   ⚠️ Filename collision: Saving as '{final_filename_on_disk}' instead.")
+            if counter > 1: self.logger(f"   ⚠️ Filename collision: Saving as '{final_filename_on_disk}' instead.")
 
             try:
                 if data_to_write_io:
-                    with open(final_save_path, 'wb') as f_out:
-                        f_out.write(data_to_write_io.getvalue())
+                    with open(final_save_path, 'wb') as f_out: f_out.write(data_to_write_io.getvalue())
                     if downloaded_part_file_path and os.path.exists(downloaded_part_file_path):
-                        try:
-                            os.remove(downloaded_part_file_path)
-                        except OSError as e_rem:
-                            self.logger(f"  -> Failed to remove .part after compression: {e_rem}")
+                        try: os.remove(downloaded_part_file_path)
+                        except OSError as e_rem: self.logger(f"  -> Failed to remove .part after compression: {e_rem}")
                 else:
                     if downloaded_part_file_path and os.path.exists(downloaded_part_file_path):
                         time.sleep(0.1)
                         os.rename(downloaded_part_file_path, final_save_path)
-                    else:
-                        raise FileNotFoundError(f"Original .part file not found for saving: {downloaded_part_file_path}")
+                    else: raise FileNotFoundError(f"Original .part file not found for saving: {downloaded_part_file_path}")
                 
                 try:
                     parsed_url_for_hash = urlparse(file_url)
                     url_hash = os.path.basename(parsed_url_for_hash.path).split('.')[0]
-                    with self.downloaded_hash_counts_lock:
-                        self.downloaded_hash_counts[url_hash] += 1
-                except Exception as e:
-                    self.logger(f"   ⚠️ Could not update post-download hash count: {e}")
+                    with self.downloaded_hash_counts_lock: self.downloaded_hash_counts[url_hash] += 1
+                except Exception as e: self.logger(f"   ⚠️ Could not update post-download hash count: {e}")
+
+                # --- Visual Sort Logic with unmatched "Unknown" folder support ---
+                if getattr(self, 'visual_sort_active', False) and is_image(final_save_path):
+                    try:
+                        models_dir = os.path.abspath(os.path.join("appdata", "models"))
+                        model_path = os.path.join(models_dir, "model.onnx")
+                        csv_path = os.path.join(models_dir, "selected_tags.csv")
+                        
+                        if os.path.exists(model_path) and os.path.exists(csv_path):
+                            sorter = VisualSorter.get_instance(model_path, csv_path)
+                            sort_result = sorter.process_image(final_save_path)
+                            
+                            # Handle backwards compatibility if a string is returned
+                            if isinstance(sort_result, str) or sort_result is None:
+                                character_name = sort_result
+                                sort_result = {"best_char": character_name, "reason": "confidence below threshold"}
+                            else:
+                                character_name = sort_result.get("best_char")
+                            
+                            # Determine folder: Character Name or "Unknown"
+                            folder_name = character_name.title() if character_name else "Unknown"
+                            folder_name = clean_folder_name(folder_name) 
+                    
+                            new_folder_path = os.path.join(effective_save_folder, folder_name)
+                            os.makedirs(new_folder_path, exist_ok=True)
+                            
+                            new_save_path = os.path.join(new_folder_path, final_filename_on_disk)
+                            
+                            # Handle filename collisions within the subfolder
+                            temp_counter = 1
+                            base_n, ext_n = os.path.splitext(final_filename_on_disk)
+                            while os.path.exists(new_save_path):
+                                final_filename_on_disk = f"{base_n}_{temp_counter}{ext_n}"
+                                new_save_path = os.path.join(new_folder_path, final_filename_on_disk)
+                                temp_counter += 1
+
+                            shutil.move(final_save_path, new_save_path)
+                            effective_save_folder = new_folder_path
+                            
+                            # --- Detailed Logging ---
+                            threshold = sort_result.get("threshold", 0.50)
+                            top_3 = sort_result.get("top_3_chars", [])
+                            top_3_str = " | ".join([f"{c} {s:.2f}" for c, s in top_3])
+
+                            if character_name:
+                                self.logger(f"   🤖 Visually sorted into -> {folder_name}\n   (Top3: {top_3_str} | Threshold: {threshold:.2f})")
+                            else:
+                                reason = sort_result.get("reason", "confidence below threshold")
+                                if reason == "no character detected" and sort_result.get("top_tags"):
+                                    top_tags = sort_result.get("top_tags", [])
+                                    tags_str = " | ".join([f"{t} {s:.2f}" for t, s in top_tags])
+                                    self.logger(f"   🤖 Sent to Unknown → {reason}\n   (Top tags: {tags_str})")
+                                elif reason == "predicted character not present in tag database":
+                                    self.logger(f"   🤖 Sent to Unknown → {reason}")
+                                else:
+                                    self.logger(f"   🤖 Sent to Unknown → {reason}\n   (Top3: {top_3_str} | Threshold: {threshold:.2f})")
                 
+                    except Exception as e:
+                        self.logger(f"   ⚠️ Visual sort failed for '{final_filename_on_disk}': {e}")
+
                 final_filename_saved_for_return = final_filename_on_disk
                 self.logger(f"✅ Saved: '{final_filename_saved_for_return}' (from '{api_original_filename}', {downloaded_size_bytes / (1024 * 1024):.2f} MB) in '{os.path.basename(effective_save_folder)}'")
 
@@ -934,57 +941,26 @@ class PostProcessorWorker:
                 }
                 self._emit_signal('file_successfully_downloaded', downloaded_file_details)
                 time.sleep(0.05)
-
                 return 1, 0, final_filename_saved_for_return, was_original_name_kept_flag, FILE_DOWNLOAD_STATUS_SUCCESS, None
 
             except Exception as save_err:
                 self.logger(f"->>Save Fail for '{final_filename_on_disk}': {save_err}")
-
                 if downloaded_part_file_path and os.path.exists(downloaded_part_file_path):
-                    try:
-                        os.remove(downloaded_part_file_path)
-                        self.logger(f"   Cleaned up temporary file after save error: {os.path.basename(downloaded_part_file_path)}")
-                    except OSError as e_rem:
-                        self.logger(f"   ⚠️ Could not clean up temporary file '{os.path.basename(downloaded_part_file_path)}' after save error: {e_rem}")
-
+                    try: os.remove(downloaded_part_file_path)
+                    except OSError: pass
                 if os.path.exists(final_save_path):
-                    try:
-                        os.remove(final_save_path)
-                    except OSError:
-                        self.logger(f"   -> Failed to remove partially saved file: {final_save_path}")
-
-                permanent_failure_details = {
-                    'file_info': file_info, 'target_folder_path': target_folder_path, 'headers': file_download_headers,
-                    'original_post_id_for_log': original_post_id_for_log, 'post_title': post_title,
-                    'file_index_in_post': file_index_in_post, 'num_files_in_this_post': num_files_in_this_post,
-                    'forced_filename_override': filename_to_save_in_main_path,
-                    'service': self.service,
-                    'user_id': self.user_id
-                }
-                return 0, 1, final_filename_saved_for_return, was_original_name_kept_flag, FILE_DOWNLOAD_STATUS_FAILED_PERMANENTLY_THIS_SESSION, permanent_failure_details
+                    try: os.remove(final_save_path)
+                    except OSError: pass
+                return 0, 1, final_filename_saved_for_return, was_original_name_kept_flag, FILE_DOWNLOAD_STATUS_FAILED_PERMANENTLY_THIS_SESSION, None
             finally:
-                if data_to_write_io and hasattr(data_to_write_io, 'close'):
-                    data_to_write_io.close()
+                if data_to_write_io and hasattr(data_to_write_io, 'close'): data_to_write_io.close()
         else:
-            self.logger(f"->>Download Fail for '{api_original_filename}' (Post ID: {original_post_id_for_log}). No successful download after retries.")
-            details_for_failure = {
-                'file_info': file_info, 
-                'target_folder_path': target_folder_path, 
-                'headers': file_download_headers,
-                'original_post_id_for_log': original_post_id_for_log, 
-                'post_title': post_title,
-                'file_index_in_post': file_index_in_post, 
-                'num_files_in_this_post': num_files_in_this_post,
-                'forced_filename_override': filename_to_save_in_main_path,
-                'added': self.post.get('added'),
-                'published': self.post.get('published'),
-                'edited': self.post.get('edited')
-
-            }
-            if is_permanent_error:
-                return 0, 1, filename_to_save_in_main_path, was_original_name_kept_flag, FILE_DOWNLOAD_STATUS_FAILED_PERMANENTLY_THIS_SESSION, details_for_failure
-            else:
-                return 0, 1, filename_to_save_in_main_path, was_original_name_kept_flag, FILE_DOWNLOAD_STATUS_FAILED_RETRYABLE_LATER, details_for_failure
+            self.logger(f"->>Download Fail for '{api_original_filename}' (Post ID: {original_post_id_for_log}).")
+            details_for_failure = {'file_info': file_info, 'target_folder_path': target_folder_path, 'headers': file_download_headers,
+                'original_post_id_for_log': original_post_id_for_log, 'post_title': post_title, 'file_index_in_post': file_index_in_post, 
+                'num_files_in_this_post': num_files_in_this_post, 'forced_filename_override': filename_to_save_in_main_path }
+            if is_permanent_error: return 0, 1, filename_to_save_in_main_path, was_original_name_kept_flag, FILE_DOWNLOAD_STATUS_FAILED_PERMANENTLY_THIS_SESSION, details_for_failure
+            else: return 0, 1, filename_to_save_in_main_path, was_original_name_kept_flag, FILE_DOWNLOAD_STATUS_FAILED_RETRYABLE_LATER, details_for_failure
 
     def _get_manga_style_filename_for_post(self, post_title, original_ext):
         """Generates a filename based on manga style, using post data."""
@@ -1717,13 +1693,11 @@ class PostProcessorWorker:
                                 break
 
                 if self.handle_unknown_mode and not known_name_match_found:
-                    self.logger(f"   ℹ️ [unknown] mode: No match in Known.txt. Creating parent folder from post title '{post_title}'.")
+                    self.logger(f"   ℹ️ [unknown] mode: No match in Known.txt. Routing to 'Unknown' parent folder.")
                     
-                    post_title_as_folder = robust_clean_name(post_title)
-                    base_folder_names_for_post_content = [post_title_as_folder]
+                    base_folder_names_for_post_content = ["Unknown"]
                     
-                    should_create_post_subfolder = False 
-                
+                    should_create_post_subfolder = True                
                 else:
                     if not known_name_match_found:
                         extracted_name_from_title_full_ignore = extract_folder_name_from_title(
@@ -1734,6 +1708,37 @@ class PostProcessorWorker:
 
                 if base_folder_names_for_post_content:
                     determined_post_save_path_for_history = os.path.join(determined_post_save_path_for_history, base_folder_names_for_post_content[0])
+
+            if self.skip_words_list and (self.skip_words_scope == SKIP_SCOPE_POSTS or self.skip_words_scope == SKIP_SCOPE_BOTH):
+                if self._check_pause(f"Skip words (post title) for post {post_id}"):
+                    result_tuple = (0, num_potential_files_in_post, [], [], [], None, None)
+                    self._emit_signal('worker_finished', result_tuple)
+                    return result_tuple
+                post_title_lower = post_title.lower()
+                for skip_word in self.skip_words_list:
+                    if skip_word.lower() in post_title_lower:
+                        self.logger(f"   -> Skip Post (Keyword in Title '{skip_word}'): '{post_title[:50]}...'. Scope: {self.skip_words_scope}")
+                        history_data_for_skipped_post = {
+                            'post_id': post_id, 'service': self.service, 'user_id': self.user_id, 'post_title': post_title,
+                            'top_file_name': "N/A (Post Skipped)", 'num_files': num_potential_files_in_post,
+                            'upload_date_str': post_data.get('published') or post_data.get('added') or "Unknown",
+                            'download_location': determined_post_save_path_for_history
+                        }
+                        result_tuple = (0, num_potential_files_in_post, [], [], [], history_data_for_skipped_post, None)
+                        self._emit_signal('worker_finished', result_tuple)
+                        return result_tuple
+
+            if not self.extract_links_only and self.use_subfolders and self.skip_words_list:
+                if self._check_pause(f"Folder keyword skip check for post {post_id}"):
+                    result_tuple = (0, num_potential_files_in_post, [], [], [], None, None)
+                    return result_tuple
+                for folder_name_to_check in base_folder_names_for_post_content:
+                    if not folder_name_to_check: continue
+                    if any(skip_word.lower() in folder_name_to_check.lower() for skip_word in self.skip_words_list):
+                        matched_skip = next((sw for sw in self.skip_words_list if sw.lower() in folder_name_to_check.lower()), "unknown_skip_word")
+                        self.logger(f"   -> Skip Post (Folder Keyword): Potential folder '{folder_name_to_check}' contains '{matched_skip}'.")
+                        result_tuple = (0, num_potential_files_in_post, [], [], [], None, None)
+                        return result_tuple
 
             if not self.extract_links_only and should_create_post_subfolder:
                 cleaned_post_title_for_sub = robust_clean_name(post_title)
@@ -1819,38 +1824,6 @@ class PostProcessorWorker:
                                 os.makedirs(os.path.join(base_path_for_post_subfolder, final_post_subfolder_name), exist_ok=True)
                                 break
                 determined_post_save_path_for_history = os.path.join(base_path_for_post_subfolder, final_post_subfolder_name)
-
-            if self.skip_words_list and (self.skip_words_scope == SKIP_SCOPE_POSTS or self.skip_words_scope == SKIP_SCOPE_BOTH):
-                if self._check_pause(f"Skip words (post title) for post {post_id}"):
-                    result_tuple = (0, num_potential_files_in_post, [], [], [], None, None)
-                    self._emit_signal('worker_finished', result_tuple)
-                    return result_tuple
-                post_title_lower = post_title.lower()
-                for skip_word in self.skip_words_list:
-                    if skip_word.lower() in post_title_lower:
-                        self.logger(f"   -> Skip Post (Keyword in Title '{skip_word}'): '{post_title[:50]}...'. Scope: {self.skip_words_scope}")
-                        history_data_for_skipped_post = {
-                            'post_id': post_id, 'service': self.service, 'user_id': self.user_id, 'post_title': post_title,
-                            'top_file_name': "N/A (Post Skipped)", 'num_files': num_potential_files_in_post,
-                            'upload_date_str': post_data.get('published') or post_data.get('added') or "Unknown",
-                            'download_location': determined_post_save_path_for_history
-                        }
-                        result_tuple = (0, num_potential_files_in_post, [], [], [], history_data_for_skipped_post, None)
-                        self._emit_signal('worker_finished', result_tuple)
-                        return result_tuple
-
-
-            if not self.extract_links_only and self.use_subfolders and self.skip_words_list:
-                if self._check_pause(f"Folder keyword skip check for post {post_id}"):
-                    result_tuple = (0, num_potential_files_in_post, [], [], [], None, None)
-                    return result_tuple
-                for folder_name_to_check in base_folder_names_for_post_content:
-                    if not folder_name_to_check: continue
-                    if any(skip_word.lower() in folder_name_to_check.lower() for skip_word in self.skip_words_list):
-                        matched_skip = next((sw for sw in self.skip_words_list if sw.lower() in folder_name_to_check.lower()), "unknown_skip_word")
-                        self.logger(f"   -> Skip Post (Folder Keyword): Potential folder '{folder_name_to_check}' contains '{matched_skip}'.")
-                        result_tuple = (0, num_potential_files_in_post, [], [], [], None, None)
-                        return result_tuple
 
             if self.extract_links_only:
                 self.logger(f"   Extract Links Only mode: Finished processing post {post_id} for links.")
@@ -2127,8 +2100,8 @@ class PostProcessorWorker:
 
                         if not known_name_match_found_for_this_file:
                             if self.handle_unknown_mode: 
-                                self.logger(f"   ℹ️ [unknown] mode: No match in Known.txt for '{current_api_original_filename}'. Using post title for folder.")
-                                base_folder_for_this_file = robust_clean_name(post_title)
+                                self.logger(f"   ℹ️ [unknown] mode: No match in Known.txt for '{current_api_original_filename}'. Routing to 'Unknown' folder.")
+                                base_folder_for_this_file = "Unknown"
                             else: 
                                 base_folder_for_this_file = extract_folder_name_from_title(post_title, effective_unwanted_keywords_for_folder_naming)
 
@@ -2138,7 +2111,7 @@ class PostProcessorWorker:
 
                     effective_spsp = should_create_post_subfolder
                     if self.handle_unknown_mode and not known_name_match_found_for_this_file:
-                        effective_spsp = False
+                        effective_spsp = True
                     
                     if effective_spsp:
                         final_path_for_this_file = os.path.join(final_path_for_this_file, final_post_subfolder_name)
@@ -2243,7 +2216,7 @@ class PostProcessorWorker:
             if not self.check_cancel():
                 self.logger(f"   Post {post_id} Summary: Downloaded={total_downloaded_this_post}, Skipped Files={total_skipped_this_post}")
 
-            if not self.extract_links_only and self.use_post_subfolders and total_downloaded_this_post == 0:
+            if not self.extract_links_only and should_create_post_subfolder and total_downloaded_this_post == 0:
                 path_to_check_for_emptiness = determined_post_save_path_for_history
                 try:
                     if os.path.isdir(path_to_check_for_emptiness):
@@ -2275,7 +2248,7 @@ class PostProcessorWorker:
                             permanent_failures_this_post, history_data_for_this_post,
                             None)
 
-            if not self.extract_links_only and self.use_post_subfolders and total_downloaded_this_post == 0:
+            if not self.extract_links_only and should_create_post_subfolder and total_downloaded_this_post == 0:
                 path_to_check_for_emptiness = determined_post_save_path_for_history
                 try:
                     if os.path.isdir(path_to_check_for_emptiness):
@@ -2383,7 +2356,9 @@ class DownloadThread(QThread):
                  sfp_threshold=None,
                  creator_name_cache=None,
                  proxies=None,
-                 download_revisions=False 
+                 download_revisions=False,
+                 visual_sort_active=False, 
+                 user_data_path=None
                  ): 
 
         super().__init__()
@@ -2462,6 +2437,8 @@ class DownloadThread(QThread):
         self.creator_name_cache = creator_name_cache 
         self.proxies = proxies
         self.download_revisions = download_revisions
+        self.visual_sort_active = visual_sort_active  
+        self.user_data_path = user_data_path
 
         if self.compress_images and Image is None:
             self.logger("⚠️ Image compression disabled: Pillow library not found (DownloadThread).")
@@ -2600,7 +2577,9 @@ class DownloadThread(QThread):
                         'manga_custom_date_format': self.manga_custom_date_format,
                         'sfp_threshold': self.sfp_threshold,
                         'proxies': self.proxies,
-                        'download_revisions': self.download_revisions 
+                        'download_revisions': self.download_revisions,
+                        'visual_sort_active': self.visual_sort_active, 
+                        'user_data_path': self.user_data_path
                     }
 
                     post_processing_worker = PostProcessorWorker(**worker_args)

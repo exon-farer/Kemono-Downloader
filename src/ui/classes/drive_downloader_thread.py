@@ -58,10 +58,12 @@ class DriveDownloadThread(QThread):
                 )
             elif self.platform == 'gofile':
                 download_gofile_folder(
-                    self.drive_url, self.output_dir,
+                    self.drive_url,
+                    self.output_dir,
                     logger_func=self.logger_func,
                     progress_callback_func=self.file_progress_signal.emit,
-                    overall_progress_callback=self.overall_progress_signal.emit
+                    overall_progress_callback=self.overall_progress_signal.emit,
+                    use_post_subfolder=self.use_post_subfolder
                 )
 
             self.finished_signal.emit(1, 0, self.is_cancelled, [])

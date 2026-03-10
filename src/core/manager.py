@@ -11,7 +11,7 @@ from ..config.constants import (
     MAX_THREADS
 )
 from ..utils.file_utils import clean_folder_name
-
+from .visual_sorter import VisualSorter
 
 class DownloadManager:
     """
@@ -266,8 +266,10 @@ class DownloadManager:
             'manga_custom_filename_format': config.get('custom_manga_filename_format', "{published} {title}"),
             'manga_custom_date_format': config.get('manga_custom_date_format', "YYYY-MM-DD"),
             'use_multithreading': config.get('use_multithreading', True),
-            'proxies': proxies, # <--- NEW: Pass proxies to worker
-            'download_revisions': config.get('download_revisions', False) # <--- ADDED: Fixes the missing key error
+            'proxies': proxies,
+            'download_revisions': config.get('download_revisions', False),
+            'visual_sort_active': config.get('visual_sort_active', False),
+            'user_data_path': config.get('user_data_path', None)
         }
         
     def _setup_creator_profile(self, config):

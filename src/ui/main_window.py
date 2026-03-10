@@ -89,6 +89,7 @@ from .dialogs.KeepDuplicatesDialog import KeepDuplicatesDialog
 from .dialogs.MultipartScopeDialog import MultipartScopeDialog
 from .dialogs.ExportLinksDialog import ExportLinksDialog
 from .dialogs.CustomFilenameDialog import CustomFilenameDialog
+from .dialogs.VisualSortDownloadDialog import VisualSortSetupDialog
 from .classes.erome_downloader_thread import EromeDownloadThread
 from .classes.saint2_downloader_thread import Saint2DownloadThread
 from .classes.discord_downloader_thread import DiscordDownloadThread
@@ -801,7 +802,8 @@ class DownloaderApp (QWidget ):
             'scan_content_images_checkbox': 'scan_content_for_images',
             'use_cookie_checkbox': 'use_cookie',
             'favorite_mode_checkbox': 'favorite_mode_active',
-            'revisions_checkbox': 'download_revisions'
+            'revisions_checkbox': 'download_revisions',
+            'visual_sort_checkbox': 'visual_sort_active'
         }
 
     def _get_current_ui_settings_as_dict(self, api_url_override=None, output_dir_override=None):
@@ -841,6 +843,7 @@ class DownloaderApp (QWidget ):
         settings['add_info_in_pdf'] = self.add_info_in_pdf_setting # Save to settings dict
         settings['keep_duplicates_mode'] = self.keep_duplicates_mode
         settings['keep_duplicates_limit'] = self.keep_duplicates_limit
+        settings['user_data_path'] = getattr(self, 'user_data_path', "")        
 
         settings['proxy_enabled'] = self.settings.value(PROXY_ENABLED_KEY, False, type=bool)
         settings['proxy_host'] = self.settings.value(PROXY_HOST_KEY, "", type=str)
@@ -1482,12 +1485,34 @@ class DownloaderApp (QWidget ):
         if hasattr(self, 'support_button'): 
             self.support_button.clicked.connect(self._show_support_dialog)
 
+        if hasattr(self, 'visual_sort_checkbox'):
+            self.visual_sort_checkbox.toggled.connect(self._handle_visual_sort_toggled)
+
+    def _handle_visual_sort_toggled(self, checked):
+        if not checked:
+            return
+
+        # Launch the custom setup dialog directly every time it's checked
+        # so the user can download models or adjust their threshold settings.
+        dialog = VisualSortSetupDialog(self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            self.log_signal.emit("✅ Visual Sort enabled and settings applied.")
+        else:
+            # The user clicked Close/Cancel, so we uncheck the box without triggering signals
+            self.visual_sort_checkbox.blockSignals(True)
+            self.visual_sort_checkbox.setChecked(False)
+            self.visual_sort_checkbox.blockSignals(False)
+            self.log_signal.emit("ℹ️ Visual Sort setup cancelled.")
+
     def _update_booru_inputs_visibility(self, text=""):
         if not hasattr(self, 'booru_inputs_widget'):
             return
         url_text = self.link_input.text().strip()
         service, _, _ = extract_post_info(url_text)
-        is_booru_url = service in ['danbooru', 'gelbooru']
+        
+        # Add 'rule34' to the list of allowed services
+        is_booru_url = service in ['danbooru', 'gelbooru', 'rule34']
         self.booru_inputs_widget.setVisible(is_booru_url)
 
     def _on_character_input_changed_live (self ,text ):
@@ -1626,7 +1651,7 @@ class DownloaderApp (QWidget ):
                                 if hasattr (self ,'log_signal'):self .log_signal .emit (f"⚠️ Empty group found in Known.txt on line {line_num }: '{line }'")
                         else :
                             parsed_known_objects .append ({
-                            "name":line ,
+                            "name": clean_folder_name(line),
                             "is_group":False ,
                             "aliases":[line ]
                             })
@@ -2502,9 +2527,12 @@ class DownloaderApp (QWidget ):
                 QTimer .singleShot (0 ,self ._try_process_next_external_link )
             return 
 
-
         if link_data not in self .extracted_links_cache :
             self .extracted_links_cache .append (link_data )
+            
+        # [FIX] Force the queue to start processing immediately if it isn't already!
+        if not self._is_processing_external_link_queue:
+            QTimer.singleShot(0, self._try_process_next_external_link)
 
     def _try_process_next_external_link (self ):
         if self ._is_processing_external_link_queue or not self .external_link_queue :
@@ -2522,87 +2550,73 @@ class DownloaderApp (QWidget ):
         self ._is_processing_external_link_queue =True 
         link_data =self .external_link_queue .popleft ()
 
-        if is_only_links_mode :
-            QTimer .singleShot (0 ,lambda data =link_data :self ._display_and_schedule_next (data ))
-        elif self ._is_download_active ():
-            delay_ms =random .randint (4000 ,8000 )
-            QTimer .singleShot (delay_ms ,lambda data =link_data :self ._display_and_schedule_next (data ))
-        else :
-            QTimer .singleShot (0 ,lambda data =link_data :self ._display_and_schedule_next (data ))
+        # [FIX] Removed the random 4000 to 8000 ms delay. Process instantly.
+        QTimer .singleShot (0 ,lambda data =link_data :self ._display_and_schedule_next (data ))
 
+    def _display_and_schedule_next(self, link_data):
+        post_title, link_text, link_url, platform, decryption_key = link_data
+        is_only_links_mode = self.radio_only_links and self.radio_only_links.isChecked()
 
-    def _display_and_schedule_next (self ,link_data ):
-        post_title ,link_text ,link_url ,platform ,decryption_key =link_data
-        is_only_links_mode =self .radio_only_links and self .radio_only_links .isChecked ()
+        # 1. Smarter logic to determine link display text (Now applies to BOTH modes)
+        cleaned_link_text = link_text.strip()
+        display_text = ""
+        if cleaned_link_text and cleaned_link_text.lower() != platform.lower() and cleaned_link_text != link_url:
+            display_text = cleaned_link_text
+        else:
+            try:
+                path = urlparse(link_url).path
+                filename = os.path.basename(path)
+                if filename:
+                    display_text = filename
+            except Exception:
+                pass
+        if not display_text:
+            display_text = link_url
 
-        # --- FONT STYLE DEFINITION ---
-        # Use a clean, widely available sans-serif font family for a modern look.
-        font_style = "font-family: 'Segoe UI', Helvetica, Arial, sans-serif;"
+        if len(display_text) > 50:
+            display_text = display_text[:50].strip() + "..."
 
-        if is_only_links_mode :
+        platform_display = platform.capitalize()
+        plain_link_info_line = f"  {platform_display} - {link_url} - ({display_text})"
+        if decryption_key:
+            plain_link_info_line += f" (Decryption Key: {decryption_key})"
+
+        # 2. Output to the appropriate log
+        if is_only_links_mode:
+            # Main Log Output (Used for "Only Links" Mode)
             if post_title != self._current_link_post_title:
                 if self._current_link_post_title is not None:
                     separator_html = f'{HTML_PREFIX}<hr style="border: 1px solid #444;">'
                     self.log_signal.emit(separator_html)
 
-                # Apply font style to the title
-                title_html = f'<p style="{font_style} font-size: 11pt; color: #87CEEB; margin-top: 2px; margin-bottom: 2px;"><b>{html.escape(post_title)}</b></p>'
+                title_html = f'<p style="font-size: 11pt; color: #87CEEB; margin-top: 2px; margin-bottom: 2px;"><b>{html.escape(post_title)}</b></p>'
                 self.log_signal.emit(HTML_PREFIX + title_html)
                 self._current_link_post_title = post_title
 
-            # Use the "smarter" logic to decide what text to show for the link
-            cleaned_link_text = link_text.strip()
-            display_text = ""
-            if cleaned_link_text and cleaned_link_text.lower() != platform.lower() and cleaned_link_text != link_url:
-                display_text = cleaned_link_text
-            else:
-                try:
-                    path = urlparse(link_url).path
-                    filename = os.path.basename(path)
-                    if filename:
-                        display_text = filename
-                except Exception:
-                    pass
-            if not display_text:
-                display_text = link_url
+            self.main_log_output.append(plain_link_info_line)
 
-            # Truncate long display text
-            if len(display_text) > 50:
-                display_text = display_text[:50].strip() + "..."
+        elif self.show_external_links:
+            # Secondary Log Output (Used for "Show External Links" Checkbox)
+            if self.external_log_output and self.external_log_output.isVisible():
+                if post_title != self._current_link_post_title:
+                    # Add a separator if it's not the first post
+                    if self._current_link_post_title is not None:
+                        self.external_log_output.append("-" * 45)
+                    
+                    # Print the Post Title once as a header
+                    self.external_log_output.append(f"📌 {post_title}")
+                    self._current_link_post_title = post_title
+                
+                # Print the cleaned-up link underneath
+                self.external_log_output.append(plain_link_info_line)
+                
+                # Keep the window scrolled to the bottom automatically
+                scrollbar = self.external_log_output.verticalScrollBar()
+                if scrollbar.value() >= scrollbar.maximum() - 50:
+                    scrollbar.setValue(scrollbar.maximum())
 
-            # Format the output as requested
-            platform_display = platform.capitalize()
-            
-            # Escape parts that will be displayed as text
-            escaped_url = html.escape(link_url)
-            escaped_display_text = html.escape(f"({display_text})")
-
-            # Apply font style to the link information and wrap in a paragraph tag
-            link_html_line = (
-                f'<p style="{font_style} font-size: 9.5pt; margin-left: 10px; margin-top: 1px; margin-bottom: 1px;">'
-                f"  <span style='color: #E0E0E0;'>{platform_display} - {escaped_url} - {escaped_display_text}</span>"
-            )
-
-            if decryption_key:
-                escaped_key = html.escape(f"(Decryption Key: {decryption_key})")
-                link_html_line += f" <span style='color: #f0ad4e;'>{escaped_key}</span>"
-            
-            link_html_line += '</p>'
-
-            # Emit the entire line as a single HTML signal
-            self.log_signal.emit(HTML_PREFIX + link_html_line)
-
-        elif self .show_external_links :
-            # This part for the secondary log remains unchanged
-            separator ="-"*45
-            formatted_link_info = f"{link_text} - {link_url} - {platform}"
-            if decryption_key:
-                formatted_link_info += f" (Decryption Key: {decryption_key})"
-            self._append_to_external_log(formatted_link_info, separator)
-
-        self ._is_processing_external_link_queue =False
-        self ._try_process_next_external_link ()
-
+        self._is_processing_external_link_queue = False
+        self._try_process_next_external_link()
 
     def _append_to_external_log (self ,formatted_link_text ,separator ):
         if not (self .external_log_output and self .external_log_output .isVisible ()):
@@ -3181,7 +3195,7 @@ class DownloaderApp (QWidget ):
                     return False 
                 self .log_signal .emit (f"⚠️ User proceeded with adding '{first_similar_new }' despite similarity with an alias of '{first_similar_existing }'.")
         new_entry ={
-        "name":name_to_add ,
+        "name": clean_folder_name(name_to_add),
         "is_group":is_group_to_add ,
         "aliases":sorted (list (set (aliases_to_add )),key =str .lower )
         }
@@ -4273,13 +4287,20 @@ class DownloaderApp (QWidget ):
                 if self.is_processing_favorites_queue and self.current_processing_favorite_item_info:
                     creator_name_for_profile = self.current_processing_favorite_item_info.get('name_for_folder')
                 else:
-                    creator_key = (service.lower(), str(user_id))
-                    creator_name_for_profile = self.creator_name_cache.get(creator_key)
+                    # FIX: Ensure service is not None before calling .lower()
+                    if service:
+                        creator_key = (service.lower(), str(user_id))
+                        creator_name_for_profile = self.creator_name_cache.get(creator_key)
+                    else:
+                        creator_name_for_profile = None
 
                 if not creator_name_for_profile:
-                    creator_name_for_profile = f"{service}_{user_id}"
+                    # FIX: Safe fallback if service or user_id is None
+                    safe_service = service if service else "unknown"
+                    safe_user = user_id if user_id else "unknown"
+                    creator_name_for_profile = f"{safe_service}_{safe_user}"
                     self.log_signal.emit(f"⚠️ Creator name not in cache. Using '{creator_name_for_profile}' for profile file.")
-
+                    
                 creator_profile_data = self._setup_creator_profile(creator_name_for_profile, self.session_file_path)
             
                 current_settings = self._get_current_ui_settings_as_dict(api_url_override=api_url, output_dir_override=effective_output_dir_for_run)
@@ -4783,7 +4804,9 @@ class DownloaderApp (QWidget ):
             'handle_unknown_mode': handle_unknown_command,
             'add_info_in_pdf': self.add_info_in_pdf_setting,     
             'proxies': current_proxies,  
-            'download_revisions': self.revisions_checkbox.isChecked() if hasattr(self, 'revisions_checkbox') else False                  
+            'download_revisions': self.revisions_checkbox.isChecked() if hasattr(self, 'revisions_checkbox') else False,                
+            'visual_sort_active': getattr(self, 'visual_sort_checkbox', None) and self.visual_sort_checkbox.isChecked(),
+            'user_data_path': getattr(self, 'user_data_path', "")
         }
 
         args_template['override_output_dir'] = override_output_dir
@@ -4845,7 +4868,8 @@ class DownloaderApp (QWidget ):
                     'keep_duplicates_limit', 'downloaded_hash_counts', 'downloaded_hash_counts_lock',
                     'processed_post_ids', 'domain_override',
                     'archive_only_mode', 'skip_file_size_mb', 
-                    'manga_custom_filename_format','manga_custom_date_format', 'sfp_threshold', 'download_revisions', 'creator_name_cache'
+                    'manga_custom_filename_format','manga_custom_date_format', 'sfp_threshold', 'download_revisions', 'creator_name_cache',
+                    'proxies', 'visual_sort_active', 'user_data_path'
 
                 ]
                 args_template['skip_current_file_flag'] = None
@@ -5244,7 +5268,9 @@ class DownloaderApp (QWidget ):
             'selected_cookie_file': self.selected_cookie_filepath,
             'add_info_in_pdf': self.add_info_in_pdf_setting,       
             'proxies': current_proxies,    
-            'download_revisions': self.revisions_checkbox.isChecked() if hasattr(self, 'revisions_checkbox') else False             
+            'download_revisions': self.revisions_checkbox.isChecked() if hasattr(self, 'revisions_checkbox') else False,           
+            'visual_sort_active': getattr(self, 'visual_sort_checkbox', None) and self.visual_sort_checkbox.isChecked(),
+            'user_data_path': getattr(self, 'user_data_path', "")
         }
 
         # 2. Define DEFAULTS for all settings that *should* be in the profile.
@@ -5288,6 +5314,8 @@ class DownloaderApp (QWidget ):
             'override_output_dir': None,
             'processed_post_ids': [],
             'add_info_in_pdf': False,
+            'visual_sort_active': False,
+            'user_data_path': getattr(self, 'user_data_path', "")
         }
 
         for item in self.fetched_posts_for_batch_update:
@@ -6528,7 +6556,9 @@ class DownloaderApp (QWidget ):
         'selected_cookie_file': self.selected_cookie_filepath,
         'app_base_dir': self.app_base_dir,
         'manga_date_file_counter_ref':None,
-        'download_revisions': self.revisions_checkbox.isChecked() if hasattr(self, 'revisions_checkbox') else False
+        'download_revisions': self.revisions_checkbox.isChecked() if hasattr(self, 'revisions_checkbox') else False,
+        'visual_sort_active': getattr(self, 'visual_sort_checkbox', None) and self.visual_sort_checkbox.isChecked(),
+        'user_data_path': getattr(self, 'user_data_path', "")
         }
 
         for job_details in self .files_for_current_retry_session :
@@ -7197,7 +7227,9 @@ class DownloaderApp (QWidget ):
             'manga_custom_filename_format': self.custom_manga_filename_format,
             'manga_custom_date_format': self.manga_custom_date_format,
             'handle_unknown_mode': download_commands.get('handle_unknown', False),
-            'download_revisions': self.revisions_checkbox.isChecked() if hasattr(self, 'revisions_checkbox') else False            
+            'download_revisions': self.revisions_checkbox.isChecked() if hasattr(self, 'revisions_checkbox') else False,       
+            'visual_sort_active': getattr(self, 'visual_sort_checkbox', None) and self.visual_sort_checkbox.isChecked(),
+            'user_data_path': getattr(self, 'user_data_path', "")
         }
 
         num_threads = int(self.thread_count_input.text()) if self.use_multithreading_checkbox.isChecked() else 1

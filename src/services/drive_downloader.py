@@ -126,114 +126,100 @@ def _download_and_decrypt_chunk(args):
     except Exception as e:
         return False
 
-def download_and_decrypt_mega_file(info, download_path, logger_func, progress_callback_func=None, cancellation_event=None, pause_event=None):
+def download_and_decrypt_mega_file(info, download_path, logger_func,
+                                   progress_callback_func=None,
+                                   cancellation_event=None,
+                                   pause_event=None):
+    """
+    Robust resumable Mega file downloader (single stream, auto-retry).
+    """
+
     file_name = info['file_name']
     file_size = info['file_size']
     dl_url = info['dl_url']
     final_path = os.path.join(download_path, file_name)
-
-    if os.path.exists(final_path) and os.path.getsize(final_path) == file_size:
-        logger_func(f"   [Mega] ℹ️ File '{file_name}' already exists with the correct size. Skipping.")
-        return
+    tmp_path = final_path + ".part"
 
     os.makedirs(download_path, exist_ok=True)
-    key, iv, _ = _parse_mega_key(urlb64_to_b64(info['file_key']))
-    nonce = iv[:8]
-    
-    # Check for cancellation before starting
-    if cancellation_event and cancellation_event.is_set():
-        logger_func(f"   [Mega] Download for '{file_name}' cancelled before starting.")
+
+    # Skip if already fully downloaded
+    if os.path.exists(final_path) and os.path.getsize(final_path) == file_size:
+        logger_func(f"   [Mega] ℹ️ File '{file_name}' already exists. Skipping.")
         return
 
+    key, iv, _ = _parse_mega_key(urlb64_to_b64(info['file_key']))
+    nonce = iv[:8]
 
-    # i tried to make the mega download multipart for big file but it didnt work you can try if you can fix this to make it multipart replace "if true" with this "if file_size < MIN_SIZE_FOR_MULTIPART_MEGA:" to activate multipart
-    if True:
-        logger_func(f"   [Mega] Downloading '{file_name}' (Single Stream)...")
+    max_retries = 5
+
+    logger_func(f"   [Mega] Downloading '{file_name}' (Resumable)...")
+
+    for attempt in range(max_retries):
+
+        if cancellation_event and cancellation_event.is_set():
+            logger_func(f"   [Mega] ❌ Download cancelled for '{file_name}'.")
+            return
+
         try:
-            cipher = AES.new(key, AES.MODE_CTR, nonce=nonce, initial_value=0)
-            with requests.get(dl_url, stream=True, timeout=(15, 300)) as r:
+            downloaded_bytes = 0
+
+            if os.path.exists(tmp_path):
+                downloaded_bytes = os.path.getsize(tmp_path)
+
+            headers = {}
+            if downloaded_bytes > 0:
+                headers["Range"] = f"bytes={downloaded_bytes}-"
+                logger_func(f"   [Mega] Resuming at {downloaded_bytes} bytes...")
+
+            cipher = AES.new(
+                key,
+                AES.MODE_CTR,
+                nonce=nonce,
+                initial_value=downloaded_bytes // 16
+            )
+
+            with requests.get(dl_url, headers=headers, stream=True, timeout=(60, 900)) as r:
                 r.raise_for_status()
-                downloaded_bytes = 0
-                last_update_time = time.time()
-                with open(final_path, 'wb') as f:
+
+                mode = "ab" if downloaded_bytes > 0 else "wb"
+
+                with open(tmp_path, mode) as f:
                     for chunk in r.iter_content(chunk_size=8192):
+
                         if cancellation_event and cancellation_event.is_set():
-                            break
+                            logger_func(f"   [Mega] ❌ Download cancelled for '{file_name}'.")
+                            return
+
                         while pause_event and pause_event.is_set():
                             time.sleep(0.5)
-                            if cancellation_event and cancellation_event.is_set():
-                                break
-                        if cancellation_event and cancellation_event.is_set():
-                            break
+
+                        if not chunk:
+                            continue
 
                         decrypted_chunk = cipher.decrypt(chunk)
                         f.write(decrypted_chunk)
                         downloaded_bytes += len(chunk)
-                        current_time = time.time()
-                        if current_time - last_update_time > 1:
-                            if progress_callback_func:
-                                progress_callback_func(file_name, (downloaded_bytes, file_size))
-                            last_update_time = time.time()
-            
-            if cancellation_event and cancellation_event.is_set():
-                logger_func(f"   [Mega] ❌ Download cancelled for '{file_name}'. Deleting partial file.")
-                if os.path.exists(final_path): os.remove(final_path)
-            else:
-                 logger_func(f"   [Mega] ✅ Successfully downloaded '{file_name}'")
+
+                        if progress_callback_func:
+                            progress_callback_func(file_name, (downloaded_bytes, file_size))
+
+            # If we reach here, download succeeded
+            break
 
         except Exception as e:
-            logger_func(f"   [Mega] ❌ Download failed for '{file_name}': {e}")
-            if os.path.exists(final_path): os.remove(final_path)
+            if attempt == max_retries - 1:
+                logger_func(f"   [Mega] ❌ Download failed for '{file_name}': {e}")
+                return
+
+            logger_func(f"   [Mega] ⚠️ Retry {attempt+1}/{max_retries} after error: {e}")
+            time.sleep(3)
+
+    # Final verification
+    if os.path.exists(tmp_path) and os.path.getsize(tmp_path) == file_size:
+        os.replace(tmp_path, final_path)
+        logger_func(f"   [Mega] ✅ Successfully downloaded '{file_name}'")
     else:
-        logger_func(f"   [Mega] Downloading '{file_name}' ({NUM_PARTS_FOR_MEGA} Parts)...")
-        chunk_size = file_size // NUM_PARTS_FOR_MEGA
-        chunks = []
-        for i in range(NUM_PARTS_FOR_MEGA):
-            start = i * chunk_size
-            end = start + chunk_size - 1 if i < NUM_PARTS_FOR_MEGA - 1 else file_size - 1
-            chunks.append((start, end))
-
-        progress_data = {'downloaded': 0, 'total_size': file_size, 'lock': Lock(), 'last_update': time.time()}
-        
-        tasks = []
-        for i, (start, end) in enumerate(chunks):
-            temp_path = f"{final_path}.part{i}"
-            tasks.append((dl_url, temp_path, start, end, key, nonce, i, progress_data, progress_callback_func, file_name, cancellation_event, pause_event))
-
-        all_parts_successful = True
-        with ThreadPoolExecutor(max_workers=NUM_PARTS_FOR_MEGA) as executor:
-            if cancellation_event and cancellation_event.is_set():
-                executor.shutdown(wait=False, cancel_futures=True)
-                all_parts_successful = False
-            else:
-                results = executor.map(_download_and_decrypt_chunk, tasks)
-                for result in results:
-                    if not result:
-                        all_parts_successful = False
-        
-        # Check for cancellation after threads finish/are cancelled
-        if cancellation_event and cancellation_event.is_set():
-            all_parts_successful = False
-            logger_func(f"   [Mega] ❌ Multipart download cancelled for '{file_name}'.")
-
-        if all_parts_successful:
-            logger_func(f"   [Mega] All parts for '{file_name}' downloaded. Assembling file...")
-            try:
-                with open(final_path, 'wb') as f_out:
-                    for i in range(NUM_PARTS_FOR_MEGA):
-                        part_path = f"{final_path}.part{i}"
-                        with open(part_path, 'rb') as f_in:
-                            f_out.write(f_in.read())
-                        os.remove(part_path)
-                logger_func(f"   [Mega] ✅ Successfully downloaded and assembled '{file_name}'")
-            except Exception as e:
-                logger_func(f"   [Mega] ❌ File assembly failed for '{file_name}': {e}")
-        else:
-            logger_func(f"   [Mega] ❌ Multipart download failed or was cancelled for '{file_name}'. Cleaning up partial files.")
-            for i in range(NUM_PARTS_FOR_MEGA):
-                part_path = f"{final_path}.part{i}"
-                if os.path.exists(part_path):
-                    os.remove(part_path)
+        logger_func(f"   [Mega] ❌ Incomplete download for '{file_name}'.")
 
 
 def _process_mega_folder(folder_id, folder_key, session, logger_func):
@@ -550,156 +536,132 @@ def download_dropbox_file(dropbox_link, download_path=".", logger_func=print, pr
     except Exception as e:
         logger_func(f"   [Dropbox] ❌ An error occurred during Dropbox download: {e}")
 
-def _get_gofile_api_token(session, logger_func):
-    """Creates a temporary guest account to get an API token."""
+def download_gofile_folder(
+    gofile_url,
+    download_path,
+    logger_func=print,
+    progress_callback_func=None,
+    overall_progress_callback=None,
+    use_post_subfolder=True
+):    
+    
+    logger_func(f"   [Gofile] Initializing download for: {gofile_url}")
+
+    match = re.search(r"gofile\.io/d/([^/?#]+)", gofile_url)
+    if not match:
+        logger_func("   [Gofile] ❌ Invalid Gofile folder URL format.")
+        if overall_progress_callback:
+            overall_progress_callback(1, 1)
+        return
+
+    content_id = match.group(1)
+
+    session = requests.Session()
+    session.headers.update({
+        "Accept-Encoding": "gzip",
+        "User-Agent": "Mozilla/5.0",
+        "Connection": "keep-alive",
+        "Accept": "*/*",
+    })
+
+    # --- Create Guest Account ---
     try:
         logger_func("   [Gofile] Creating temporary guest account for API token...")
         response = session.post("https://api.gofile.io/accounts", timeout=20)
         response.raise_for_status()
-        data = response.json()
-        if data.get("status") == "ok":
-            token = data["data"]["token"]
-            logger_func("   [Gofile] ✅ Successfully obtained API token.")
-            return token
-        else:
-            logger_func(f"   [Gofile] ❌ Failed to get API token, status: {data.get('status')}")
-            return None
-    except Exception as e:
-        logger_func(f"   [Gofile] ❌ Error creating guest account: {e}")
-        return None
+        token_data = response.json()
 
-def _get_gofile_website_token(session, logger_func):
-    """Fetches the 'wt' (website token) from Gofile's global JS file."""
-    try:
-        logger_func("   [Gofile] Fetching website token (wt)...")
-        response = session.get("https://gofile.io/dist/js/global.js", timeout=20)
-        response.raise_for_status()
-        match = re.search(r'\.wt = "([^"]+)"', response.text)
-        if match:
-            wt = match.group(1)
-            logger_func("   [Gofile] ✅ Successfully fetched website token.")
-            return wt
-        logger_func("   [Gofile] ❌ Could not find website token in JS file.")
-        return None
-    except Exception as e:
-        logger_func(f"   [Gofile] ❌ Error fetching website token: {e}")
-        return None
+        if token_data.get("status") != "ok":
+            logger_func("   [Gofile] ❌ Failed to create guest account.")
+            return
 
-def download_gofile_folder(gofile_url, download_path, logger_func=print, progress_callback_func=None, overall_progress_callback=None):
-    """Downloads all files from a Gofile folder URL."""
-    logger_func(f"   [Gofile] Initializing download for: {gofile_url}")
-    
-    match = re.search(r"gofile\.io/d/([^/?#]+)", gofile_url)
-    if not match:
-        logger_func("   [Gofile] ❌ Invalid Gofile folder URL format.")
-        if overall_progress_callback: overall_progress_callback(1, 1)
+        token = token_data["data"]["token"]
+
+        session.cookies.set("accountToken", token)
+        session.headers.update({"Authorization": f"Bearer {token}"})
+
+        logger_func("   [Gofile] ✅ Successfully obtained API token.")
+    except Exception as e:
+        logger_func(f"   [Gofile] ❌ Account creation failed: {e}")
         return
 
-    content_id = match.group(1)
-    
-    scraper = cloudscraper.create_scraper()
-
+    # --- Fetch Folder Structure ---
     try:
-        retry_strategy = Retry(
-            total=5,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["HEAD", "GET", "POST"]
-        )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        scraper.mount("http://", adapter)
-        scraper.mount("https://", adapter)
-        logger_func("   [Gofile] 🔧 Configured robust retry strategy for network requests.")
-    except Exception as e:
-        logger_func(f"   [Gofile] ⚠️ Could not configure retry strategy: {e}")
+        api_url = f"https://api.gofile.io/contents/{content_id}?cache=true&sortField=createTime&sortDirection=1"
 
-    api_token = _get_gofile_api_token(scraper, logger_func)
-    if not api_token:
-        if overall_progress_callback: overall_progress_callback(1, 1)
-        return
-
-    website_token = _get_gofile_website_token(scraper, logger_func)
-    if not website_token:
-        if overall_progress_callback: overall_progress_callback(1, 1)
-        return
-
-    try:
-        scraper.cookies.set("accountToken", api_token, domain=".gofile.io")
-        scraper.headers.update({"Authorization": f"Bearer {api_token}"})
-        
-        api_url = f"https://api.gofile.io/contents/{content_id}?wt={website_token}"
         logger_func(f"   [Gofile] Fetching folder contents for ID: {content_id}")
-        response = scraper.get(api_url, timeout=30)
+
+        response = session.get(
+            api_url,
+            headers={"X-Website-Token": "4fd6sg89d7s6"},
+            timeout=30
+        )
         response.raise_for_status()
+
         data = response.json()
 
         if data.get("status") != "ok":
-            if data.get("status") == "error-passwordRequired":
-                logger_func("   [Gofile] ❌ This folder is password protected. Downloading password-protected folders is not supported.")
-            else:
-                logger_func(f"   [Gofile] ❌ API Error: {data.get('status')}. The folder may be expired or invalid.")
-            if overall_progress_callback: overall_progress_callback(1, 1)
+            logger_func(f"   [Gofile] ❌ API Error: {data.get('status')}")
             return
 
-        folder_info = data.get("data", {})
-        folder_name = clean_folder_name(folder_info.get("name", content_id))
-        files_to_download = [item for item in folder_info.get("children", {}).values() if item.get("type") == "file"]
+        folder_info = data["data"]
 
-        if not files_to_download:
-            logger_func("   [Gofile] ℹ️ No files found in this Gofile folder.")
-            if overall_progress_callback: overall_progress_callback(0, 0)
+        if folder_info["type"] != "folder":
+            logger_func("   [Gofile] ❌ Not a folder.")
             return
 
-        final_download_path = os.path.join(download_path, folder_name)
+        folder_name = clean_folder_name(folder_info["name"])
+
+        if use_post_subfolder:
+            final_download_path = os.path.join(download_path, folder_name)
+            logger_func(f"   [Gofile] Subfolder per Post is ON. Saving to '{folder_name}'")
+        else:
+            final_download_path = download_path
+            logger_func("   [Gofile] Subfolder per Post is OFF. Saving files directly.")
+
         os.makedirs(final_download_path, exist_ok=True)
-        logger_func(f"   [Gofile] Found {len(files_to_download)} file(s). Saving to folder: '{folder_name}'")
-        if overall_progress_callback: overall_progress_callback(len(files_to_download), 0)
-        
-        download_session = requests.Session()
-        adapter = HTTPAdapter(max_retries=Retry(
-            total=5, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504]
-        ))
-        download_session.mount("http://", adapter)
-        download_session.mount("https://", adapter)
+        files = [
+            child for child in folder_info["children"].values()
+            if child["type"] == "file"
+        ]
 
-        for i, file_info in enumerate(files_to_download):
-            filename = file_info.get("name")
-            file_url = file_info.get("link")
+        if not files:
+            logger_func("   [Gofile] ℹ️ No files found.")
+            return
+
+        logger_func(f"   [Gofile] Found {len(files)} file(s).")
+
+        if overall_progress_callback:
+            overall_progress_callback(len(files), 0)
+
+        # --- Download Files ---
+        for index, file_info in enumerate(files):
+            filename = file_info["name"]
+            file_url = file_info["link"]
             file_size = file_info.get("size", 0)
+
             filepath = os.path.join(final_download_path, filename)
-            
-            if os.path.exists(filepath) and os.path.getsize(filepath) == file_size:
-                logger_func(f"   [Gofile] ({i+1}/{len(files_to_download)}) ⏩ Skipping existing file: '{filename}'")
-                if overall_progress_callback: overall_progress_callback(len(files_to_download), i + 1)
-                continue
-            
-            logger_func(f"   [Gofile] ({i+1}/{len(files_to_download)}) 🔽 Downloading: '{filename}'")
-            with download_session.get(file_url, stream=True, timeout=(60, 600)) as r:
+
+            logger_func(f"   [Gofile] ({index+1}/{len(files)}) 🔽 Downloading '{filename}'")
+
+            with session.get(file_url, stream=True, timeout=(30, 600)) as r:
                 r.raise_for_status()
-                
-                if progress_callback_func:
-                    progress_callback_func(filename, (0, file_size))
-                
-                downloaded_bytes = 0
-                last_log_time = time.time()
-                with open(filepath, 'wb') as f:
+
+                downloaded = 0
+                with open(filepath, "wb") as f:
                     for chunk in r.iter_content(chunk_size=8192):
+                        if not chunk:
+                            continue
                         f.write(chunk)
-                        downloaded_bytes += len(chunk)
-                        current_time = time.time()
-                        if current_time - last_log_time > 0.5: # Update slightly faster
-                            if progress_callback_func:
-                                progress_callback_func(filename, (downloaded_bytes, file_size))
-                            last_log_time = current_time
-                
-                if progress_callback_func:
-                    progress_callback_func(filename, (file_size, file_size))
+                        downloaded += len(chunk)
+
+                        if progress_callback_func:
+                            progress_callback_func(filename, (downloaded, file_size))
 
             logger_func(f"   [Gofile] ✅ Finished '{filename}'")
-            if overall_progress_callback: overall_progress_callback(len(files_to_download), i + 1)
-            time.sleep(1)
+
+            if overall_progress_callback:
+                overall_progress_callback(len(files), index + 1)
 
     except Exception as e:
-        logger_func(f"   [Gofile] ❌ An error occurred during Gofile download: {e}")
-        if not isinstance(e, requests.exceptions.RequestException):
-            traceback.print_exc()
+        logger_func(f"   [Gofile] ❌ Download failed: {e}")

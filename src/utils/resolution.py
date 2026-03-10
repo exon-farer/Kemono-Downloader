@@ -204,12 +204,17 @@ def setup_ui(main_app):
     main_app.booru_inputs_widget = QWidget()
     booru_inputs_layout = QHBoxLayout(main_app.booru_inputs_widget)
     booru_inputs_layout.setContentsMargins(0, 5, 0, 0)
+    
     main_app.api_key_label = QLabel("API Key:")
     main_app.api_key_input = QLineEdit()
-    main_app.api_key_input.setPlaceholderText("Danbooru or Gelbooru API Key")
+    # Update this placeholder:
+    main_app.api_key_input.setPlaceholderText("Danbooru, Gelbooru, or Rule34 API Key")
+    
     main_app.user_id_label = QLabel("User ID:")
     main_app.user_id_input = QLineEdit()
-    main_app.user_id_input.setPlaceholderText("Danbooru Username or Gelbooru User ID")
+    # Update this placeholder:
+    main_app.user_id_input.setPlaceholderText("Username or Rule34 User ID")
+   
     booru_inputs_layout.addWidget(main_app.api_key_label)
     booru_inputs_layout.addWidget(main_app.api_key_input, 1)
     booru_inputs_layout.addSpacing(10)
@@ -272,6 +277,10 @@ def setup_ui(main_app):
     main_app.revisions_checkbox.setChecked(initial_rev_state)
     
     main_app.advanced_row1_layout.addWidget(main_app.revisions_checkbox)
+
+    main_app.visual_sort_checkbox = QCheckBox("Visual Sort (Beta)")
+    main_app.visual_sort_checkbox.setToolTip("Automatically sort downloaded images into character folders using AI. Requires downloading a 130MB model.")
+    main_app.advanced_row1_layout.addWidget(main_app.visual_sort_checkbox)
 
     # --- Original Cookie Controls (for non-SimpCity sites) ---
     main_app.use_cookie_checkbox = QCheckBox("Use Cookie")

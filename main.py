@@ -10,6 +10,7 @@ from PyQt5.QtCore import QCoreApplication
 
 # --- Local Application Imports ---
 from src.ui.main_window import DownloaderApp
+from src.core.visual_sorter import VisualSorter
 from src.ui.dialogs.TourDialog import TourDialog
 from src.config.constants import CONFIG_ORGANIZATION_NAME, CONFIG_APP_NAME_MAIN
 
@@ -45,6 +46,25 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
     # Also call the default excepthook
     sys.__excepthook__(exc_type, exc_value, exc_traceback)
 
+# In main.py
+def preload_ai_model():
+    """Try to preload the AI model if it exists. If not, continue normally."""
+    try:
+        models_dir = os.path.abspath(os.path.join("appdata", "models"))
+        model_path = os.path.join(models_dir, "model.onnx")
+        csv_path = os.path.join(models_dir, "selected_tags.csv")
+        
+        if not os.path.exists(model_path) or not os.path.exists(csv_path):
+            # Log to console or internal logging system
+            print("ℹ️ Visual Sort AI model not found. This feature will be available once downloaded via settings.")
+            return
+
+        # Pre-initialize the singleton if files exist
+        from src.core.visual_sorter import VisualSorter
+        VisualSorter.get_instance(model_path, csv_path)
+        print("✅ Visual Sort AI engine initialized successfully.")
+    except Exception as e:
+        print(f"⚠️ Note: Visual Sort engine could not be pre-loaded: {e}")
 
 def main():
     """Main entry point for the Kemono Downloader application."""
@@ -56,7 +76,7 @@ def main():
         # Set up application metadata for QSettings
         QCoreApplication.setOrganizationName(CONFIG_ORGANIZATION_NAME)
         QCoreApplication.setApplicationName(CONFIG_APP_NAME_MAIN)
-        
+        preload_ai_model()
         qt_app = QApplication(sys.argv)
 
         # Create the main application window

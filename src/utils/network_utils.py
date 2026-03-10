@@ -149,6 +149,12 @@ def extract_post_info(url_string):
         video_id = rule34video_match.group(1)
         return 'rule34video', video_id, None
 
+    # --- Rule34.xxx Check ---
+    rule34_match = re.search(r'rule34\.xxx', stripped_url)
+    if rule34_match:
+        # Returning 'rule34', the full URL, and None for post_id
+        return 'rule34', stripped_url, None
+
     # --- Danbooru Check ---
     danbooru_match = re.search(r'danbooru\.donmai\.us|safebooru\.donmai\.us', stripped_url)
     if danbooru_match:

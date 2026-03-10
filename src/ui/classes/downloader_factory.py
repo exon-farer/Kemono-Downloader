@@ -26,6 +26,7 @@ from .simp_city_downloader_thread import SimpCityDownloadThread
 from .toonily_downloader_thread import ToonilyDownloadThread
 from .deviantart_downloader_thread import DeviantArtDownloadThread
 from .hentaifox_downloader_thread import HentaiFoxDownloadThread
+from .rule34_downloader_thread import Rule34DownloadThread
 
 def create_downloader_thread(main_app, api_url, service, id1, id2, effective_output_dir_for_run):
     """
@@ -62,6 +63,15 @@ def create_downloader_thread(main_app, api_url, service, id1, id2, effective_out
     if 'erome.com' in api_url:
         return EromeDownloadThread(api_url, effective_output_dir_for_run, main_app)
 
+    # Handler for Rule34
+    if service == 'rule34':
+        main_app.log_signal.emit("ℹ️ Rule34 URL detected. Starting dedicated downloader.")
+        
+        # Grab the credentials from the UI fields you already use for Booru sites
+        api_key = main_app.api_key_input.text().strip()
+        user_id = main_app.user_id_input.text().strip()
+        
+        return Rule34DownloadThread(api_url, effective_output_dir_for_run, api_key, user_id, main_app)
     # Handler for MangaDex
     if 'mangadex.org' in api_url:
         return MangaDexDownloadThread(api_url, effective_output_dir_for_run, main_app)
