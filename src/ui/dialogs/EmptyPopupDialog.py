@@ -505,7 +505,7 @@ class EmptyPopupDialog (QDialog ):
             self ._is_scrolling_titles =False 
 
     def _start_download(self):
-        github_raw_url = "https://raw.githubusercontent.com/Yuvi9587/Kemono-Downloader/main/data/creators.json"
+        github_raw_url = "https://media.githubusercontent.com/media/Yuvi9587/Kemono-Downloader/main/data/creators.json"
         
         self.dl_button.setEnabled(False)
         self.dl_progress.show()
