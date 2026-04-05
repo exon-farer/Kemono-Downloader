@@ -133,13 +133,21 @@ def create_pdf_from_discord_messages(messages_data, server_name, channel_name, o
 
             for att in attachments:
                 file_name = att.get('filename', 'untitled')
-                full_url = att.get('url', '#')
-                pdf.write(5, text=f"[Attachment: {file_name}]", link=full_url)
+                full_url = att.get('url', '')
+                
+                if full_url.startswith('http'):
+                    pdf.write(5, text=f"[Attachment: {file_name}]", link=full_url)
+                else:
+                    pdf.write(5, text=f"[Attachment: {file_name} (No URL)]")
                 pdf.ln()
 
             for embed in embeds:
-                embed_url = embed.get('url', 'no url')
-                pdf.write(5, text=f"[Embed: {embed_url}]", link=embed_url)
+                embed_url = embed.get('url', '')
+                
+                if embed_url.startswith('http'):
+                    pdf.write(5, text=f"[Embed: {embed_url}]", link=embed_url)
+                else:
+                    pdf.write(5, text=f"[Embed: Missing URL]")
                 pdf.ln()
 
             pdf.set_text_color(0, 0, 0)

@@ -1747,22 +1747,38 @@ class DownloaderApp (QWidget ):
             return
 
         api_url = self.link_input.text().strip()
-        service, server_id, channel_id = extract_post_info(api_url)
-
-        if service != 'discord':
-            QMessageBox.critical(self, "Input Error", "This feature is only for Discord URLs.")
+        
+        # --- THE FIX: Custom Discord URL Parser ---
+        server_id = None
+        channel_id = None
+        
+        if "/discord/server/" in api_url.lower():
+            # Example: https://kemono.cr/discord/server/553172672893419520/1274208191529353216
+            parts = api_url.split("/discord/server/")[1].strip("/").split("/")
+            if len(parts) >= 1:
+                server_id = parts[0]
+            if len(parts) >= 2:
+                channel_id = parts[1]
+        
+        if not server_id:
+            QMessageBox.critical(self, "Input Error", "Could not detect a valid Discord Server ID in the URL.\nPlease ensure it looks like: kemono.cr/discord/server/123/456")
             return
+        # ------------------------------------------
 
         default_filename = f"discord_{server_id}_{channel_id or 'server'}.pdf"
         filepath, _ = QFileDialog.getSaveFileName(self, "Save Discord Log as PDF", default_filename, "PDF Files (*.pdf)")
 
         if not filepath:
             self.log_signal.emit("ℹ️ Discord PDF save cancelled by user.")
-            return
+            return        
+        self.set_ui_enabled(False)
+
+        
+        session = requests.Session()
         
         pdf_thread = threading.Thread(
             target=self._run_discord_pdf_creation_thread, 
-            args=(api_url, server_id, channel_id, filepath),
+            args=(session, api_url, server_id, channel_id, filepath), 
             daemon=True
         )
         pdf_thread.start()
@@ -1774,16 +1790,9 @@ class DownloaderApp (QWidget ):
         def queue_progress_label_update(message):
             self.worker_to_gui_queue.put({'type': 'set_progress_label', 'payload': (message,)})
 
-        token = self.remove_from_filename_input.text().strip()
-        headers = {
-            'Authorization': token,
-            'User-Agent': USERAGENT_FIREFOX,
-        }
-
-        self.set_ui_enabled(False)
         queue_logger("=" * 40)
-        queue_logger(f"🚀 Starting Discord PDF export for: {api_url}")
-        queue_progress_label_update("Fetching messages...")
+        queue_logger(f"🚀 Starting Kemono Discord PDF export for: {api_url}")
+        queue_progress_label_update("Fetching messages from Kemono API...")
 
         all_messages = []
         channels_to_process = []
@@ -1792,43 +1801,53 @@ class DownloaderApp (QWidget ):
         if channel_id:
             channels_to_process.append({'id': channel_id, 'name': channel_id})
         else:
-            pass
+            queue_logger("   Fetching channel list for server...")
+            channels = fetch_server_channels(server_id, logger=queue_logger)
+            if channels:
+                channels_to_process.extend(channels)
 
+        if not channels_to_process:
+            queue_logger("❌ Could not determine any channels to process.")
+            self.finished_signal.emit(0, 0, False, [])
+            return
+
+        # Fetch messages directly from Kemono API
         for i, channel in enumerate(channels_to_process):
-            queue_progress_label_update(f"Fetching from channel {i+1}/{len(channels_to_process)}: #{channel.get('name', '')}")
-            last_message_id = None
-            while not self.cancellation_event.is_set():
-                url_endpoint = f"/channels/{channel['id']}/messages?limit=100"
-                if last_message_id:
-                    url_endpoint += f"&before={last_message_id}"
+            chan_name = channel.get('name', channel.get('id', 'unknown'))
+            queue_progress_label_update(f"Fetching from channel {i+1}/{len(channels_to_process)}: #{chan_name}")
+            
+            try:
+                message_generator = fetch_channel_messages(
+                    channel['id'], 
+                    logger=queue_logger, 
+                    cancellation_event=self.cancellation_event, 
+                    pause_event=self.pause_event, 
+                    cookies_dict=None  # <-- THE FIX: Hardcoded to None
+                )
                 
-                try:
-                    resp = session.get(f"https://discord.com/api/v10{url_endpoint}", headers=headers)
-                    resp.raise_for_status()
-                    message_batch = resp.json()
-                except Exception:
-                    message_batch = []
+                for message_batch in message_generator:
+                    if self.cancellation_event.is_set():
+                        break
+                    if message_batch:
+                        all_messages.extend(message_batch)
+                        queue_progress_label_update(f"Fetched {len(all_messages)} messages...")
+            except Exception as e:
+                queue_logger(f"❌ Error fetching messages for channel {chan_name}: {e}")
 
-                if not message_batch:
-                    break
-                
-                all_messages.extend(message_batch)
-
-                if message_limit and len(all_messages) >= message_limit:
-                    queue_logger(f"   Reached message limit of {message_limit}. Halting fetch.")
-                    all_messages = all_messages[:message_limit]
-                    break
-
-                last_message_id = message_batch[-1]['id']
-                queue_progress_label_update(f"Fetched {len(all_messages)} messages...")
-                time.sleep(1)
-
-            if message_limit and len(all_messages) >= message_limit:
+            if self.cancellation_event.is_set():
                 break
-        
+
+        if not all_messages:
+            queue_logger("   No messages were found or fetched to create a PDF.")
+            self.finished_signal.emit(0, 0, self.cancellation_event.is_set(), [])
+            return
+            
         queue_progress_label_update(f"Collected {len(all_messages)} total messages. Generating PDF...")
         
-        all_messages.reverse()
+        try:
+            all_messages.sort(key=lambda x: x.get('published', ''))
+        except Exception:
+            all_messages.reverse()
 
         font_path = os.path.join(self.app_base_dir, 'data', 'dejavu-sans', 'DejaVuSans.ttf')
 
@@ -3981,8 +4000,18 @@ class DownloaderApp (QWidget ):
         specialized site (like Discord/Bunkr) or standard Kemono/Coomer, and spins up the 
         appropriate multi-threaded or single-threaded background workers.
         """
-        self.is_main_download_active = True
         global KNOWN_NAMES, BackendDownloadThread, PostProcessorWorker, extract_post_info, MAX_FILE_THREADS_PER_POST_OR_WORKER
+        
+        if getattr(self, 'discord_download_scope', 'files') == 'messages':
+            current_url = direct_api_url if direct_api_url else self.link_input.text().strip()
+            
+            # extract_post_info returns 'discord' for kemono.cr/discord/server/... links
+            service, _, _ = extract_post_info(current_url)
+            if service == 'discord':
+                self.start_discord_pdf_save()
+                return # Stop the standard file download process completely!
+
+        self.is_main_download_active = True
 
         from ..utils.file_utils import clean_folder_name, KNOWN_NAMES
         from ..config.constants import FOLDER_NAME_STOP_WORDS
